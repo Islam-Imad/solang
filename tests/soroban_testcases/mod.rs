@@ -19,6 +19,8 @@ mod print;
 mod storage;
 mod storage_array;
 mod strings;
+mod struct_arity;
+mod struct_single_field;
 mod structs;
 mod timelock;
 mod timestamp;

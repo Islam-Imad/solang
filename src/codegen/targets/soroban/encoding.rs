@@ -195,9 +195,9 @@ pub fn soroban_decode_arg(
             decoded.cast(&Type::Enum(enum_no), ns)
         }
 
-        Type::Int(128) | Type::Uint(128) => decode_i128(wrapper_cfg, vartab, arg),
+        Type::Int(128) | Type::Uint(128) => decode_i128(wrapper_cfg, vartab, arg, &ty),
 
-        Type::Int(256) | Type::Uint(256) => decode_i256(wrapper_cfg, vartab, arg),
+        Type::Int(256) | Type::Uint(256) => decode_i256(wrapper_cfg, vartab, arg, &ty),
 
         Type::Uint(32) => {
             // get payload out of major bits then truncate to 32‑bit
@@ -245,7 +245,7 @@ pub fn soroban_decode_arg(
             signed: true,
         },
         Type::Struct(StructType::UserDefined(n)) => {
-            decode_struct(arg, wrapper_cfg, vartab, n, ns, ty)
+            decode_struct_map(arg, wrapper_cfg, vartab, n, ns, ty)
         }
         Type::Array(elem_ty, _) => {
             if let Type::StorageRef(_, _) = arg.ty() {
@@ -263,6 +263,51 @@ pub fn soroban_decode_arg(
                 ty.to_string(ns),
             )
         ),
+    }
+}
+
+/// STORAGE-lane decode entry point. Structs go through the buffer-based
+/// `decode_struct_storage`; every other type falls back to the ABI decoder
+/// `soroban_decode_arg` (identical behavior for non-structs). Keeping structs on their own
+/// function isolates the storage lane from the ABI struct arm, which becomes MAP-based later.
+pub fn soroban_storage_decode_arg(
+    arg: Expression,
+    wrapper_cfg: &mut ControlFlowGraph,
+    vartab: &mut Vartable,
+    ns: &Namespace,
+    decode_as: Option<Type>,
+) -> Expression {
+    let ty = match &decode_as {
+        Some(ty) => ty.clone(),
+        None => match arg.ty() {
+            Type::Ref(inner) => *inner,
+            Type::StorageRef(_, inner) => *inner,
+            Type::SorobanHandle(inner) => *inner,
+            other => other,
+        },
+    };
+
+    match ty {
+        Type::Struct(StructType::UserDefined(n)) => {
+            decode_struct_storage(arg, wrapper_cfg, vartab, n, ns, ty)
+        }
+        _ => soroban_decode_arg(arg, wrapper_cfg, vartab, ns, decode_as),
+    }
+}
+
+/// STORAGE-lane encode entry point. Structs go through the buffer-based
+/// `encode_struct_storage`; every other type falls back to the ABI encoder
+/// `soroban_encode_arg`. Mirror of `soroban_storage_decode_arg`.
+pub fn soroban_storage_encode_arg(
+    item: Expression,
+    cfg: &mut ControlFlowGraph,
+    vartab: &mut Vartable,
+    ns: &Namespace,
+) -> Expression {
+    if let Type::Struct(StructType::UserDefined(n)) = item.ty() {
+        encode_struct_storage(item, cfg, vartab, ns, n)
+    } else {
+        soroban_encode_arg(item, cfg, vartab, ns)
     }
 }
 
@@ -709,12 +754,13 @@ pub fn soroban_encode_arg(
             }
         }
         Type::Struct(StructType::UserDefined(n)) => {
-            let buf = encode_struct(item.clone(), cfg, vartab, ns, n);
+            // ABI lane: a struct return value becomes a named-field SCV_MAP.
+            let map = encode_struct_map(item.clone(), cfg, vartab, ns, n);
 
             Instr::Set {
                 loc: Loc::Codegen,
                 res: obj,
-                expr: buf,
+                expr: map,
             }
         }
         Type::SorobanHandle(_) => Instr::Set {
@@ -1045,12 +1091,15 @@ fn encode_i256(
     ret
 }
 
-fn decode_i128(cfg: &mut ControlFlowGraph, vartab: &mut Vartable, arg: Expression) -> Expression {
-    let ty = match arg.ty() {
-        Type::Ref(inner_ty) => *inner_ty.clone(),
-        Type::SorobanHandle(inner_ty) => *inner_ty.clone(),
-        _ => arg.ty(),
-    };
+fn decode_i128(
+    cfg: &mut ControlFlowGraph,
+    vartab: &mut Vartable,
+    arg: Expression,
+    ty: &Type,
+) -> Expression {
+    // Use the caller-provided target type, NOT `arg.ty()`: a struct field / map_get result is a
+    // bare Uint(64), which would fall through the type-based dispatch below to `unreachable!()`.
+    let ty: Type = ty.clone();
 
     let ret_var = vartab.temp_anonymous(&ty);
 
@@ -1244,12 +1293,15 @@ fn decode_i128(cfg: &mut ControlFlowGraph, vartab: &mut Vartable, arg: Expressio
 /// Decodes a 256-bit integer (signed or unsigned) from a Soroban ScVal.
 /// This function handles both Int256 and Uint256 types by retrieving
 /// the four 64-bit pieces from the host object.
-fn decode_i256(cfg: &mut ControlFlowGraph, vartab: &mut Vartable, arg: Expression) -> Expression {
-    let ty = match arg.ty() {
-        Type::Ref(inner_ty) => *inner_ty.clone(),
-        Type::SorobanHandle(inner_ty) => *inner_ty.clone(),
-        _ => arg.ty(),
-    };
+fn decode_i256(
+    cfg: &mut ControlFlowGraph,
+    vartab: &mut Vartable,
+    arg: Expression,
+    ty: &Type,
+) -> Expression {
+    // Use the caller-provided target type, NOT `arg.ty()`: a struct field / map_get result is a
+    // bare Uint(64), which would fall through the type-based dispatch below to `unreachable!()`.
+    let ty: Type = ty.clone();
 
     let ret_var = vartab.temp_anonymous(&ty);
 
@@ -1656,8 +1708,111 @@ fn extract_tag(arg: Expression) -> Expression {
     }
 }
 
-/// encode a struct into a buffer where each field is 64 bits long soroban Val.
-fn encode_struct(
+/// Build the Soroban Symbol `Val` used as a struct field's map key (shared by the ABI encode
+/// and decode paths). Field names are capped at 30 chars by the contract spec
+/// (`SCSpecUDTStructFieldV0.name<30>`); enforce it here with a simple codegen assert.
+fn struct_field_key(
+    name: &str,
+    loc: pt::Loc,
+    cfg: &mut ControlFlowGraph,
+    vartab: &mut Vartable,
+    ns: &Namespace,
+) -> Expression {
+    assert!(
+        name.len() <= 30,
+        "Soroban struct field name '{name}' exceeds the 30-character limit"
+    );
+    encode_as_symbol(
+        Expression::BytesLiteral {
+            loc,
+            ty: Type::String,
+            value: name.as_bytes().to_vec(),
+        },
+        cfg,
+        vartab,
+        ns,
+    )
+}
+
+/// ABI-lane encode: build a named-field `SCV_MAP` from a struct. Entries are inserted with
+/// `map_put(map, symbol(field_name), value)` in declaration order; the host keeps the map in
+/// key-sorted order, so nothing is sorted here. Nested struct fields recurse through
+/// `soroban_encode_arg` (whose struct arm points back to this function).
+fn encode_struct_map(
+    item: Expression,
+    cfg: &mut ControlFlowGraph,
+    vartab: &mut Vartable,
+    ns: &Namespace,
+    struct_no: usize,
+) -> Expression {
+    let loc = item.loc();
+
+    // map = map_new()
+    let map_var = vartab.temp_name("struct_map", &Type::Uint(64));
+    cfg.add(
+        vartab,
+        Instr::Call {
+            res: vec![map_var],
+            return_tys: vec![Type::Uint(64)],
+            call: InternalCallTy::HostFunction {
+                name: HostFunctions::MapNew.name().to_string(),
+            },
+            args: vec![],
+        },
+    );
+    let map_expr = Expression::Variable {
+        loc,
+        ty: Type::Uint(64),
+        var_no: map_var,
+    };
+
+    let fields = &ns.structs[struct_no].fields;
+    for (index, field) in fields.iter().enumerate() {
+        let name = field
+            .id
+            .as_ref()
+            .map(|id| id.name.clone())
+            .unwrap_or_else(|| index.to_string());
+        let key = struct_field_key(&name, loc, cfg, vartab, ns);
+
+        // Load struct.<field>, then encode it. NOTE: this is correct for value-type fields
+        // (ints, bool, address, bytesN, enum). Reference-type fields (string, dynamic bytes,
+        // nested struct) are NOT yet supported here — extracting them from the returned struct
+        // needs proper reference-type load semantics (see plan Step 4 notes). They are expected
+        // to be gated out until that lands.
+        let member = Expression::StructMember {
+            loc,
+            ty: field.ty.clone(),
+            expr: Box::new(item.clone()),
+            member: index,
+        };
+        let value = Expression::Load {
+            loc: Loc::Codegen,
+            ty: field.ty.clone(),
+            expr: Box::new(member),
+        };
+        let value = soroban_encode_arg(value, cfg, vartab, ns);
+
+        // map = map_put(map, key, value)
+        cfg.add(
+            vartab,
+            Instr::Call {
+                res: vec![map_var],
+                return_tys: vec![Type::Uint(64)],
+                call: InternalCallTy::HostFunction {
+                    name: HostFunctions::MapPut.name().to_string(),
+                },
+                args: vec![map_expr.clone(), key, value],
+            },
+        );
+    }
+
+    map_expr
+}
+
+/// STORAGE-lane encode: pack a struct into a buffer where each field is a 64-bit Soroban Val.
+/// (The ABI lane uses a separate MAP-based encoder.)
+fn encode_struct_storage(
     item: Expression,
     cfg: &mut ControlFlowGraph,
     vartab: &mut Vartable,
@@ -1731,8 +1886,9 @@ fn encode_vector(
     }
 }
 
-/// Decode a struct from soroban encoding. Struct fields are laid out sequentially in a buffer, where each field is 64 bits long.
-fn decode_struct(
+/// STORAGE-lane decode: read a struct laid out sequentially in a buffer, each field a 64-bit Val.
+/// (The ABI lane uses a separate MAP-based decoder.)
+fn decode_struct_storage(
     mut item: Expression,
     cfg: &mut ControlFlowGraph,
     vartab: &mut Vartable,
@@ -1755,7 +1911,9 @@ fn decode_struct(
             expr: Box::new(item.clone()),
         };
 
-        let decode_val = soroban_decode_arg(loaded_val, cfg, vartab, ns, Some(ty.clone()));
+        // Recurse on the storage lane so a nested struct field stays buffer-based (the ABI
+        // struct arm now routes to the MAP decoder).
+        let decode_val = soroban_storage_decode_arg(loaded_val, cfg, vartab, ns, Some(ty.clone()));
 
         members.push(decode_val);
 
@@ -1771,6 +1929,68 @@ fn decode_struct(
 
     Expression::StructLiteral {
         loc: Loc::Codegen,
+        ty: struct_ty,
+        values: members,
+    }
+}
+
+/// ABI-lane decode: read a named-field `SCV_MAP` into a struct. The incoming `arg` is the
+/// MapObject handle (a 64-bit `Val`). For each field, in declaration order, look the value up by
+/// its field-name Symbol with `map_get`; lookup by key is insertion-order independent, so no
+/// sorting is needed here (the host keeps the map key-sorted). Non-struct fields defer to
+/// `soroban_decode_arg` (which threads the target type into `decode_i128`/`decode_i256`); a
+/// nested struct field recurses back here through that decoder's struct arm.
+///
+/// NOTE: mirrors `encode_struct_map`. Reference-type fields (string, dynamic bytes) are still
+/// subject to the reference-type limitation tracked in the plan; value-type fields and nested
+/// structs are the supported set.
+fn decode_struct_map(
+    arg: Expression,
+    cfg: &mut ControlFlowGraph,
+    vartab: &mut Vartable,
+    struct_no: usize,
+    ns: &Namespace,
+    struct_ty: Type,
+) -> Expression {
+    let loc = arg.loc();
+
+    let fields = &ns.structs[struct_no].fields;
+    let mut members = Vec::with_capacity(fields.len());
+
+    for (index, field) in fields.iter().enumerate() {
+        let name = field
+            .id
+            .as_ref()
+            .map(|id| id.name.clone())
+            .unwrap_or_else(|| index.to_string());
+        let key = struct_field_key(&name, loc, cfg, vartab, ns);
+
+        // val = map_get(map, key); traps on the host if the caller omitted this field.
+        let val_var = vartab.temp_name("map_val", &Type::Uint(64));
+        cfg.add(
+            vartab,
+            Instr::Call {
+                res: vec![val_var],
+                return_tys: vec![Type::Uint(64)],
+                call: InternalCallTy::HostFunction {
+                    name: HostFunctions::MapGet.name().to_string(),
+                },
+                args: vec![arg.clone(), key],
+            },
+        );
+        let val = Expression::Variable {
+            loc,
+            ty: Type::Uint(64),
+            var_no: val_var,
+        };
+
+        // Struct fields recurse through the ABI decoder's struct arm (→ decode_struct_map).
+        let decoded = soroban_decode_arg(val, cfg, vartab, ns, Some(field.ty.clone()));
+        members.push(decoded);
+    }
+
+    Expression::StructLiteral {
+        loc,
         ty: struct_ty,
         values: members,
     }

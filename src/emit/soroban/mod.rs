@@ -13,7 +13,8 @@ use inkwell::{
 };
 use soroban_sdk::xdr::{
     Limited, Limits, ScEnvMetaEntry, ScEnvMetaEntryInterfaceVersion, ScSpecEntry,
-    ScSpecFunctionInputV0, ScSpecFunctionV0, ScSpecTypeDef, ScSpecTypeVec, StringM, WriteXdr,
+    ScSpecFunctionInputV0, ScSpecFunctionV0, ScSpecTypeDef, ScSpecTypeUdt, ScSpecTypeVec,
+    ScSpecUdtStructFieldV0, ScSpecUdtStructV0, StringM, WriteXdr,
 };
 
 const SOROBAN_ENV_INTERFACE_VERSION: ScEnvMetaEntryInterfaceVersion =
@@ -106,6 +107,11 @@ impl HostFunctions {
                 .i64_type()
                 .fn_type(&[ty.into(), ty.into(), ty.into()], false),
 
+            HostFunctions::MapGet => bin
+                .context
+                .i64_type()
+                .fn_type(&[ty.into(), ty.into()], false),
+
             HostFunctions::VecPushBack => bin
                 .context
                 .i64_type()
@@ -186,10 +192,13 @@ impl HostFunctions {
 pub struct SorobanTarget;
 
 impl SorobanTarget {
-    fn vec_spec_type(ty: &ast::Type) -> ScSpecTypeDef {
+    /// Map a Solidity type to its Soroban spec type. Named "vec_spec_type" because it began as the
+    /// array-element mapper, but it now covers every ABI-representable type (incl. user-defined
+    /// structs → `Udt`) so it is reused for struct field types as well.
+    fn vec_spec_type(ty: &ast::Type, ns: &ast::Namespace) -> ScSpecTypeDef {
         match ty {
             ast::Type::Array(nested, _) => {
-                let nested = Self::vec_spec_type(nested.as_ref());
+                let nested = Self::vec_spec_type(nested.as_ref(), ns);
                 ScSpecTypeDef::Vec(Box::new(ScSpecTypeVec {
                     element_type: Box::new(nested),
                 }))
@@ -201,14 +210,28 @@ impl SorobanTarget {
             ast::Type::Int(64) => ScSpecTypeDef::I64,
             ast::Type::Int(128) => ScSpecTypeDef::I128,
             ast::Type::Uint(128) => ScSpecTypeDef::U128,
+            ast::Type::Int(256) => ScSpecTypeDef::I256,
+            ast::Type::Uint(256) => ScSpecTypeDef::U256,
             ast::Type::Bool => ScSpecTypeDef::Bool,
             ast::Type::Address(_) => ScSpecTypeDef::Address,
-            ast::Type::Bytes(_) => ScSpecTypeDef::Bytes,
+            ast::Type::Bytes(_) | ast::Type::DynamicBytes => ScSpecTypeDef::Bytes,
             ast::Type::String => ScSpecTypeDef::String,
-            ast::Type::Ref(inner) => Self::vec_spec_type(inner.as_ref()),
-            ast::Type::SorobanHandle(inner) => Self::vec_spec_type(inner.as_ref()),
+            ast::Type::Struct(ast::StructType::UserDefined(n)) => Self::udt_spec_type(*n, ns),
+            ast::Type::Ref(inner) => Self::vec_spec_type(inner.as_ref(), ns),
+            ast::Type::SorobanHandle(inner) => Self::vec_spec_type(inner.as_ref(), ns),
             _ => panic!("unsupported array element type {ty:?}"),
         }
+    }
+
+    /// Build a `ScSpecTypeDef::Udt` that references a user-defined struct by its declared name.
+    /// A matching `ScSpecEntry::UdtStructV0` is emitted by `emit_struct_spec_entries`.
+    fn udt_spec_type(struct_no: usize, ns: &ast::Namespace) -> ScSpecTypeDef {
+        let name = ns.structs[struct_no].id.name.as_str();
+        ScSpecTypeDef::Udt(ScSpecTypeUdt {
+            name: name
+                .try_into()
+                .unwrap_or_else(|_| panic!("struct name {name:?} exceeds the 60-char spec limit")),
+        })
     }
 
     pub fn build<'a>(
@@ -233,6 +256,7 @@ impl SorobanTarget {
         let mut export_list = Vec::new();
         Self::declare_externals(&mut bin);
         Self::emit_functions_with_spec(contract, &mut bin, context, contract_no, &mut export_list);
+        Self::emit_struct_spec_entries(context, contract, &mut bin);
         bin.internalize(export_list.as_slice());
 
         //Self::emit_initializer(&mut binary, ns, contract.constructors(ns).first());
@@ -325,7 +349,7 @@ impl SorobanTarget {
         bin: &mut Binary<'a>,
     ) {
         if cfg.public && !cfg.is_placeholder() {
-            // TODO: Emit custom type spec entries
+            let ns = bin.ns;
             let mut spec = Limited::new(Vec::new(), Limits::none());
             ScSpecEntry::FunctionV0(ScSpecFunctionV0 {
                 name: name
@@ -366,11 +390,14 @@ impl SorobanTarget {
                                 }
                                 ast::Type::String => ScSpecTypeDef::String,
                                 ast::Type::Array(ty, _) => {
-                                    let element = Self::vec_spec_type(ty.as_ref());
+                                    let element = Self::vec_spec_type(ty.as_ref(), ns);
 
                                     ScSpecTypeDef::Vec(Box::new(ScSpecTypeVec {
                                         element_type: Box::new(element),
                                     }))
+                                }
+                                ast::Type::Struct(ast::StructType::UserDefined(n)) => {
+                                    Self::udt_spec_type(*n, ns)
                                 }
                                 _ => panic!("unsupported input type {:?}", p.ty),
                             }
@@ -405,9 +432,11 @@ impl SorobanTarget {
                             ast::Type::Bytes(_) | ast::Type::DynamicBytes => ScSpecTypeDef::Bytes,
                             ast::Type::String => ScSpecTypeDef::String,
                             ast::Type::Void => ScSpecTypeDef::Void,
-                            ast::Type::Struct(_) => ScSpecTypeDef::Void, // TODO: Map struct types.
+                            ast::Type::Struct(ast::StructType::UserDefined(n)) => {
+                                Self::udt_spec_type(n, ns)
+                            }
                             ast::Type::Array(elem, _) => {
-                                let element = Self::vec_spec_type(elem.as_ref());
+                                let element = Self::vec_spec_type(elem.as_ref(), ns);
                                 ScSpecTypeDef::Vec(Box::new(ScSpecTypeVec {
                                     element_type: Box::new(element),
                                 }))
@@ -424,6 +453,94 @@ impl SorobanTarget {
             .unwrap_or_else(|_| panic!("writing spec to xdr for function {}", cfg.name));
 
             Self::add_custom_section(context, &bin.module, "contractspecv0", spec.inner);
+        }
+    }
+
+    /// Emit one `ScSpecEntry::UdtStructV0` per user-defined struct reachable from a public
+    /// function signature (params + returns), recursing through nested struct fields. Deduped:
+    /// each struct yields exactly one entry regardless of how many functions reference it.
+    /// Fields are emitted in declaration order (the wire map is host-sorted regardless).
+    fn emit_struct_spec_entries<'a>(
+        context: &'a Context,
+        contract: &'a ast::Contract,
+        bin: &mut Binary<'a>,
+    ) {
+        let ns = bin.ns;
+
+        // Collect struct dependencies in a deterministic, deduped order.
+        let mut structs: Vec<usize> = Vec::new();
+        for cfg in contract.cfg.iter() {
+            if !cfg.public || cfg.is_placeholder() {
+                continue;
+            }
+            for p in cfg.params.iter().chain(cfg.returns.iter()) {
+                Self::collect_struct_deps(&p.ty, ns, &mut structs);
+            }
+        }
+
+        for struct_no in structs {
+            let decl = &ns.structs[struct_no];
+
+            let name: StringM<60> = decl.id.name.as_str().try_into().unwrap_or_else(|_| {
+                panic!(
+                    "struct name {:?} exceeds the 60-char spec limit",
+                    decl.id.name
+                )
+            });
+
+            let fields = decl
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(i, f)| {
+                    let fname =
+                        f.id.as_ref()
+                            .map(|id| id.name.clone())
+                            .unwrap_or_else(|| i.to_string());
+                    ScSpecUdtStructFieldV0 {
+                        doc: StringM::default(),
+                        name: fname.as_str().try_into().unwrap_or_else(|_| {
+                            panic!("struct field name {fname:?} exceeds the 30-char spec limit")
+                        }),
+                        type_: Self::vec_spec_type(&f.ty, ns),
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let mut spec = Limited::new(Vec::new(), Limits::none());
+            ScSpecEntry::UdtStructV0(ScSpecUdtStructV0 {
+                doc: StringM::default(),
+                lib: StringM::default(),
+                name,
+                fields: fields
+                    .try_into()
+                    .expect("struct field count exceeds spec limit"),
+            })
+            .write_xdr(&mut spec)
+            .unwrap_or_else(|_| panic!("writing struct spec entry for {:?}", decl.id.name));
+
+            Self::add_custom_section(context, &bin.module, "contractspecv0", spec.inner);
+        }
+    }
+
+    /// Recursively collect the `struct_no`s referenced by a type into `acc` (deduped, insertion
+    /// order preserved). Recurses through refs, arrays, and nested struct fields.
+    fn collect_struct_deps(ty: &ast::Type, ns: &ast::Namespace, acc: &mut Vec<usize>) {
+        match ty {
+            ast::Type::Struct(ast::StructType::UserDefined(n)) => {
+                if !acc.contains(n) {
+                    acc.push(*n);
+                    for f in &ns.structs[*n].fields {
+                        Self::collect_struct_deps(&f.ty, ns, acc);
+                    }
+                }
+            }
+            ast::Type::Ref(inner) | ast::Type::SorobanHandle(inner) => {
+                Self::collect_struct_deps(inner, ns, acc);
+            }
+            ast::Type::StorageRef(_, inner) => Self::collect_struct_deps(inner, ns, acc),
+            ast::Type::Array(elem, _) => Self::collect_struct_deps(elem, ns, acc),
+            _ => {}
         }
     }
 
@@ -489,6 +606,7 @@ impl SorobanTarget {
             HostFunctions::MapNewFromLinearMemory,
             HostFunctions::MapNew,
             HostFunctions::MapPut,
+            HostFunctions::MapGet,
             HostFunctions::VecPushBack,
             HostFunctions::VecGet,
             HostFunctions::VecPut,

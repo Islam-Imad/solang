@@ -4,7 +4,10 @@ pub(crate) mod dispatch;
 pub(crate) mod encoding;
 pub(crate) mod events;
 
-use self::encoding::{soroban_decode, soroban_decode_arg, soroban_encode, soroban_encode_arg};
+use self::encoding::{
+    soroban_decode, soroban_decode_arg, soroban_encode, soroban_encode_arg,
+    soroban_storage_decode_arg, soroban_storage_encode_arg,
+};
 use self::events::SorobanEventEmitter;
 use crate::codegen::cfg::{ASTFunction, ControlFlowGraph, Instr, InternalCallTy};
 use crate::codegen::error::CodegenError;
@@ -98,8 +101,8 @@ impl TargetCodegen for SorobanTarget {
                 return value;
             }
         }
-        // SetStorage or Store to a SorobanHandle: encode as ScVal.
-        soroban_encode_arg(value, cfg, vartab, ns)
+        // SetStorage or Store to a SorobanHandle: encode as ScVal (storage lane).
+        soroban_storage_encode_arg(value, cfg, vartab, ns)
     }
 
     fn default_storage_value(
@@ -856,7 +859,7 @@ impl TargetCodegen for SorobanTarget {
         vartab: &mut Vartable,
         ns: &Namespace,
     ) -> Expression {
-        soroban_decode_arg(value, cfg, vartab, ns, None)
+        soroban_storage_decode_arg(value, cfg, vartab, ns, None)
     }
 
     fn post_process_program(&self, _ns: &mut Namespace, _opt: &Options) {}
@@ -976,9 +979,28 @@ pub(super) fn validate_abi_types(all_cfg: &[ControlFlowGraph], ns: &mut Namespac
     validate_unsupported_codegen_paths(all_cfg, ns);
 }
 
+/// A struct is allowed as a Soroban ABI param/return value unless one of its fields is (or
+/// recursively nests) an array. Returns `Some(offending field type)` when an array field is
+/// found, else `None`. Every other field type is allowed (scalars incl. 128/256, `address`,
+/// `bool`, `string`, `bytes`/`bytesN`, `enum`, and nested structs).
+fn soroban_struct_field_unsupported(ty: &Type, ns: &Namespace) -> Option<String> {
+    match ty {
+        Type::Array(..) => Some(ty.to_string(ns)),
+        Type::Struct(struct_ty) => struct_ty
+            .definition(ns)
+            .fields
+            .iter()
+            .find_map(|field| soroban_struct_field_unsupported(&field.ty, ns)),
+        _ => None,
+    }
+}
+
 fn unsupported_parameter_type(ty: &Type, ns: &Namespace) -> Option<String> {
     match ty {
-        Type::Struct(_) => Some(format!("{} memory", ty.to_string(ns))),
+        // A struct is fine as long as none of its (nested) fields is an array.
+        Type::Struct(_) => {
+            soroban_struct_field_unsupported(ty, ns).map(|_| format!("{} memory", ty.to_string(ns)))
+        }
         Type::Array(elem, _) if has_unsupported_soroban_array_element(elem.as_ref()) => {
             Some(format!("{} memory", ty.to_string(ns)))
         }
@@ -1021,7 +1043,10 @@ fn unsupported_event_type(ty: &Type, ns: &Namespace) -> Option<String> {
 
 fn unsupported_return_type(ty: &Type, ns: &Namespace) -> Option<String> {
     match ty {
-        Type::Struct(_) => Some(format!("{} memory", ty.to_string(ns))),
+        // A struct is fine as long as none of its (nested) fields is an array.
+        Type::Struct(_) => {
+            soroban_struct_field_unsupported(ty, ns).map(|_| format!("{} memory", ty.to_string(ns)))
+        }
         Type::Array(_, _) => Some(format!("{} memory", ty.to_string(ns))),
         _ => None,
     }
