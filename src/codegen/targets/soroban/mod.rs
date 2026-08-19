@@ -117,6 +117,9 @@ impl TargetCodegen for SorobanTarget {
             Type::Array(_, dims) if dims.last() == Some(&ast::ArrayLength::Dynamic) => {
                 Some(soroban_default_handle(loc, ty, cfg, vartab, ns))
             }
+            Type::Array(..) if ty.array_length().is_some() => {
+                Some(soroban_default_handle(loc, ty, cfg, vartab, ns))
+            }
             Type::Struct(StructType::UserDefined(_)) => {
                 Some(soroban_default_handle(loc, ty, cfg, vartab, ns))
             }
@@ -1372,7 +1375,9 @@ pub(super) fn validate_abi_types(all_cfg: &[ControlFlowGraph], ns: &mut Namespac
 fn soroban_struct_field_unsupported(ty: &Type, ns: &Namespace) -> Option<String> {
     match ty {
         Type::Array(elem, dims) => {
-            if dims.last() != Some(&ast::ArrayLength::Dynamic)
+            // Both dynamic (`T[]`) and fixed-length (`T[N]`) array fields are
+            // supported; only `AnyFixed` (unsized fixed) dims are rejected.
+            if dims.last() == Some(&ast::ArrayLength::AnyFixed)
                 || has_unsupported_soroban_array_element(elem.as_ref())
             {
                 Some(ty.to_string(ns))
@@ -1779,7 +1784,74 @@ pub(crate) fn soroban_default_handle(
         Type::Array(_, dims) if dims.last() == Some(&ast::ArrayLength::Dynamic) => {
             soroban_vec_new(loc, ty, cfg, vartab)
         }
+        // Fixed-length array (`T[N]`): default to a host vector of `N` element
+        // defaults so an uninitialized read decodes exactly `N` elements.
+        Type::Array(..) if ty.array_length().is_some() => {
+            soroban_fixed_array_default_vec(loc, ty, cfg, vartab, ns)
+        }
         _ => unreachable!("Type has no default storage value"),
+    }
+}
+
+/// Build a host vector holding `N` copies of the element default, for the
+/// default value of a fixed-length array `T[N]`. Mirrors
+/// [`soroban_struct_default_vec`] but with a homogeneous element type.
+fn soroban_fixed_array_default_vec(
+    loc: &pt::Loc,
+    array_ty: &Type,
+    cfg: &mut ControlFlowGraph,
+    vartab: &mut Vartable,
+    ns: &Namespace,
+) -> Expression {
+    let handle_ty = soroban_vec_handle_ty(array_ty);
+    let elem_ty = array_ty.array_elem();
+    let count = array_ty
+        .array_length()
+        .expect("fixed array has a constant length")
+        .clone();
+
+    let vec_no = vartab.temp_name("array_default", &handle_ty);
+    cfg.add(
+        vartab,
+        Instr::Call {
+            res: vec![vec_no],
+            return_tys: vec![handle_ty.clone()],
+            call: InternalCallTy::HostFunction {
+                name: HostFunctions::VectorNew.name().to_string(),
+            },
+            args: vec![],
+        },
+    );
+
+    let mut current_vec_no = vec_no;
+    let mut i = BigInt::zero();
+    while i < count {
+        let elem = soroban_default_handle(loc, &elem_ty, cfg, vartab, ns);
+        let prev_vec = Expression::Variable {
+            loc: *loc,
+            ty: handle_ty.clone(),
+            var_no: current_vec_no,
+        };
+        let next_vec_no = vartab.temp_name("array_default", &handle_ty);
+        cfg.add(
+            vartab,
+            Instr::Call {
+                res: vec![next_vec_no],
+                return_tys: vec![handle_ty.clone()],
+                call: InternalCallTy::HostFunction {
+                    name: HostFunctions::VecPushBack.name().to_string(),
+                },
+                args: vec![prev_vec, elem],
+            },
+        );
+        current_vec_no = next_vec_no;
+        i += 1;
+    }
+
+    Expression::Variable {
+        loc: *loc,
+        ty: handle_ty,
+        var_no: current_vec_no,
     }
 }
 

@@ -5,6 +5,7 @@ mod array_args;
 mod array_bytes_strings;
 mod array_nested;
 mod array_scalars;
+mod array_static;
 mod array_structs;
 mod atomic_swap;
 mod auth;
