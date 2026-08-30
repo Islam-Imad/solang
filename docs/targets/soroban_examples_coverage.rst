@@ -55,6 +55,9 @@ Documented Counterparts
    * - `logging <https://github.com/stellar/soroban-examples/tree/main/logging>`_
      - `docs/examples/soroban/error.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/error.sol>`_
      - Demonstrates ``print()``-based runtime logging in Solang.
+   * - `merkle_distribution <https://github.com/stellar/soroban-examples/tree/main/merkle_distribution>`_
+     - `docs/examples/soroban/merkle_distribution.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/merkle_distribution.sol>`_ and `tests/soroban_testcases/example_merkle_distribution.rs <https://github.com/hyperledger-solang/solang/blob/main/tests/soroban_testcases/example_merkle_distribution.rs>`_
+     - Merkle-proof airdrop: recipients claim tokens by supplying a Merkle proof against a stored root, and verified claims trigger a cross-contract token transfer. Demonstrates ``sha256`` hashing, the ``to_xdr`` builtin for canonical XDR leaf serialization, ``bytes.concat`` for a real 64-byte inner-node preimage, a ``bytes32[]`` proof parameter, a ``mapping(uint32 => bool)`` claimed-set, and cross-contract ``call`` via ``abi.encode``. The leaf preimage is ``sha256(to_xdr(Receiver{index, recipient, amount}))``, mirroring upstream's ``sha256(Receiver.to_xdr())``; it differs only in the field name ``recipient`` (Solidity reserves ``address``), which changes the struct's ScMap keys, so off-chain tree builders must serialize with this contract's exact struct. Tested via ``merkle_distribution_*`` test cases.
    * - `timelock <https://github.com/stellar/soroban-examples/tree/main/timelock>`_
      - `docs/examples/soroban/timelock <https://github.com/hyperledger-solang/solang/tree/main/docs/examples/soroban/timelock>`_
      - Timelock-style example using enums, mappings, authorization, and ``block.timestamp``.
@@ -530,6 +533,90 @@ Replaces the running contract's Wasm in place. The admin-gated ``upgrade`` first
         }
     }
 
+merkle_distribution
+^^^^^^^^^^^^^^^^^^^
+
+Upstream Soroban example: `merkle_distribution <https://github.com/stellar/soroban-examples/tree/main/merkle_distribution>`_
+
+Solang Solidity example: `docs/examples/soroban/merkle_distribution.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/merkle_distribution.sol>`_
+
+A Merkle-proof airdrop. The constructor stores the tree root and pulls a
+funding deposit from a token contract; ``claim`` recomputes the Merkle root
+from a leaf and its proof, verifies it against the stored root, and pays the
+receiver. Inner nodes hash a real 64-byte buffer via ``bytes.concat`` (not
+``abi.encode``, which on Soroban would pack ScVal object handles). The leaf is
+``sha256(to_xdr(Receiver{index, recipient, amount}))``, matching upstream's
+``sha256(Receiver.to_xdr())`` — the ``to_xdr`` builtin lowers to the Soroban
+host's ``serialize_to_bytes``, the same primitive the Rust SDK uses, so the leaf
+commits to the value's canonical XDR rather than to ephemeral ScVal object
+handles. The one divergence from upstream is the field name ``recipient``
+(Solidity reserves ``address`` as a keyword), which changes the struct's ScMap
+symbol keys and therefore the XDR bytes, so an off-chain tree builder must
+serialize with this contract's exact field names.
+
+.. code-block:: solidity
+
+    contract merkle_distribution {
+        bytes32 instance rootHash;
+        address instance tokenAddress;
+        mapping(uint32 => bool) instance claimed;
+
+        struct Receiver {
+            uint32 index;
+            address recipient;
+            int128 amount;
+        }
+
+        constructor(
+            bytes32 root_hash,
+            address token,
+            int128 funding_amount,
+            address funding_source
+        ) {
+            rootHash = root_hash;
+            tokenAddress = token;
+            bytes payload = abi.encode(
+                "transfer", funding_source, address(this), funding_amount
+            );
+            (bool ok, ) = token.call(payload);
+            require(ok, "funding transfer failed");
+        }
+
+        function compute_root(bytes32 leaf, bytes32[] memory proof)
+            public
+            pure
+            returns (bytes32)
+        {
+            bytes32 h = leaf;
+            for (uint32 i = 0; i < proof.length; i++) {
+                if (h < proof[i]) {
+                    h = sha256(bytes.concat(h, proof[i]));
+                } else {
+                    h = sha256(bytes.concat(proof[i], h));
+                }
+            }
+            return h;
+        }
+
+        function claim(
+            uint32 index,
+            address receiver,
+            int128 amount,
+            bytes32[] memory proof
+        ) public {
+            require(!claimed[index], "AlreadyClaimed");
+            Receiver memory node = Receiver(index, receiver, amount);
+            bytes32 leaf = sha256(to_xdr(node));
+            require(compute_root(leaf, proof) == rootHash, "InvalidProof");
+            bytes payload = abi.encode(
+                "transfer", address(this), receiver, amount
+            );
+            (bool ok, ) = tokenAddress.call(payload);
+            require(ok, "payout transfer failed");
+            claimed[index] = true;
+        }
+    }
+
 Upstream Examples Not Yet Documented as Supported
 +++++++++++++++++++++++++++++++++++++++++++++++++
 
@@ -539,7 +626,6 @@ The following upstream examples do not currently have a documented Solidity coun
 - `errors <https://github.com/stellar/soroban-examples/tree/main/errors>`_
 - `eth_abi <https://github.com/stellar/soroban-examples/tree/main/eth_abi>`_
 - `fuzzing <https://github.com/stellar/soroban-examples/tree/main/fuzzing>`_
-- `merkle_distribution <https://github.com/stellar/soroban-examples/tree/main/merkle_distribution>`_
 - `mint-lock <https://github.com/stellar/soroban-examples/tree/main/mint-lock>`_
 - `privacy-pools <https://github.com/stellar/soroban-examples/tree/main/privacy-pools>`_
 - `simple_account <https://github.com/stellar/soroban-examples/tree/main/simple_account>`_

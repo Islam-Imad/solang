@@ -1843,6 +1843,7 @@ pub enum Builtin {
     UpdateCurrentContractWasm,
     ExtendTtl,
     ExtendInstanceTtl,
+    ToXdr,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]

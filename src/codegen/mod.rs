@@ -156,6 +156,8 @@ pub enum HostFunctions {
     StringLen,
     StringCopyToLinearMemory,
     ContractEvent,
+    SerializeToBytes,
+    DeserializeFromBytes,
 }
 
 impl HostFunctions {
@@ -221,6 +223,8 @@ impl HostFunctions {
             HostFunctions::StringLen => "b.k",
             HostFunctions::StringCopyToLinearMemory => "b.g",
             HostFunctions::ContractEvent => "x.1",
+            HostFunctions::SerializeToBytes => "b._",
+            HostFunctions::DeserializeFromBytes => "b.0",
             HostFunctions::VecLen => "v.3",
             HostFunctions::VecPopBack => "v.7",
             HostFunctions::VecGet => "v.1",
