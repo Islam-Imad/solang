@@ -36,17 +36,28 @@ pub struct Prototype {
 }
 
 // A list of all Solidity builtins functions
-pub static BUILTIN_FUNCTIONS: Lazy<[Prototype; 29]> = Lazy::new(|| {
+pub static BUILTIN_FUNCTIONS: Lazy<[Prototype; 30]> = Lazy::new(|| {
     [
         Prototype {
             builtin: Builtin::ExtendInstanceTtl,
             namespace: None,
             method: vec![],
-            name: "extendInstanceTtl",  
+            name: "extendInstanceTtl",
             params: vec![Type::Uint(32), Type::Uint(32)],
             ret: vec![Type::Int(64)],
             target: vec![Target::Soroban],
             doc: "If the TTL for the current contract instance and code (if applicable) is below `threshold` ledgers, extend `live_until_ledger_seq` such that TTL == `extend_to`, where TTL is defined as live_until_ledger_seq - current ledger.",
+            constant: false,
+        },
+        Prototype {
+            builtin: Builtin::UpdateCurrentContractWasm,
+            namespace: None,
+            method: vec![],
+            name: "updateCurrentContractWasm",
+            params: vec![Type::Bytes(32)],
+            ret: vec![],
+            target: vec![Target::Soroban],
+            doc: "Replaces the running contract's Wasm code with the module identified by the given 32-byte hash (an already-uploaded Wasm blob). Maps to the host function `update_current_contract_wasm`. The upgrade takes effect after the current invocation completes.",
             constant: false,
         },
         Prototype {

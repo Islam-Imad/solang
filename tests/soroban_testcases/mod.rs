@@ -29,6 +29,7 @@ mod example_increment_with_pause;
 mod example_other_custom_types;
 mod example_pause;
 mod example_single_offer;
+mod example_upgradeable_contract;
 mod i128_u128;
 mod i256_u256;
 mod integer_width_rounding;
