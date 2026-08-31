@@ -920,6 +920,35 @@ impl TargetCodegen for SorobanTarget {
                     var_no: res,
                 })
             }
+            ast::Builtin::UpdateCurrentContractWasm => {
+                assert_eq!(
+                    args.len(),
+                    1,
+                    "updateCurrentContractWasm expects 1 argument"
+                );
+
+                let input = expression(&args[0], cfg, contract_no, func, ns, vartab, opt, self);
+                let wasm_hash = soroban_encode_arg(input, cfg, vartab, ns);
+
+                let res = vartab.temp_name("update_current_contract_wasm", &Type::Uint(64));
+                cfg.add(
+                    vartab,
+                    Instr::Call {
+                        res: vec![res],
+                        return_tys: vec![Type::Void],
+                        call: InternalCallTy::HostFunction {
+                            name: HostFunctions::UpdateCurrentContractWasm.name().to_string(),
+                        },
+                        args: vec![wasm_hash],
+                    },
+                );
+
+                Some(Expression::Variable {
+                    loc: *loc,
+                    ty: Type::Uint(64),
+                    var_no: res,
+                })
+            }
             _ => None,
         }
     }

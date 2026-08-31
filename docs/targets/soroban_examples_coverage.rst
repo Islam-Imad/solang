@@ -73,6 +73,9 @@ Documented Counterparts
    * - `ttl <https://github.com/stellar/soroban-examples/tree/main/ttl>`_
      - `docs/examples/soroban/ttl_storage.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/ttl_storage.sol>`_
      - Extending TTL on stored contract data.
+   * - `upgradeable_contract <https://github.com/stellar/soroban-examples/tree/main/upgradeable_contract>`_
+     - `docs/examples/soroban/upgradeable_contract.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/upgradeable_contract.sol>`_ and `tests/soroban_testcases/example_upgradeable_contract.rs <https://github.com/hyperledger-solang/solang/blob/main/tests/soroban_testcases/example_upgradeable_contract.rs>`_
+     - Admin-gated self-upgrade: replaces the running contract Wasm via ``updateCurrentContractWasm(bytes32)`` (host ``update_current_contract_wasm``), after ``requireAuth()`` on the stored admin. A ``version()`` marker flips 1 → 2 across the upgrade. Tested via ``example_upgradeable_contract_*`` test cases.
 
 Solidity Translations
 +++++++++++++++++++++
@@ -499,6 +502,34 @@ Solang Solidity example: `docs/examples/soroban/single_offer.sol <https://github
         }
     }
 
+upgradeable_contract
+^^^^^^^^^^^^^^^^^^^^
+
+Upstream Soroban example: `upgradeable_contract <https://github.com/stellar/soroban-examples/tree/main/upgradeable_contract>`_
+
+Solang Solidity example: `docs/examples/soroban/upgradeable_contract.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/upgradeable_contract.sol>`_
+
+Replaces the running contract's Wasm in place. The admin-gated ``upgrade`` first calls ``requireAuth()`` on the stored admin, then hands an already-uploaded Wasm hash to ``updateCurrentContractWasm(bytes32)``, which lowers to the host function ``update_current_contract_wasm``. The ``version()`` marker returns 1 in this build and 2 in the upgraded build, so a caller can observe the swap.
+
+.. code-block:: solidity
+
+    contract UpgradeableContract {
+        address instance admin;
+
+        constructor(address _admin) {
+            admin = _admin;
+        }
+
+        function version() public pure returns (uint32) {
+            return 1;
+        }
+
+        function upgrade(bytes32 new_wasm_hash) public {
+            admin.requireAuth();
+            updateCurrentContractWasm(new_wasm_hash);
+        }
+    }
+
 Upstream Examples Not Yet Documented as Supported
 +++++++++++++++++++++++++++++++++++++++++++++++++
 
@@ -512,7 +543,6 @@ The following upstream examples do not currently have a documented Solidity coun
 - `mint-lock <https://github.com/stellar/soroban-examples/tree/main/mint-lock>`_
 - `privacy-pools <https://github.com/stellar/soroban-examples/tree/main/privacy-pools>`_
 - `simple_account <https://github.com/stellar/soroban-examples/tree/main/simple_account>`_
-- `upgradeable_contract <https://github.com/stellar/soroban-examples/tree/main/upgradeable_contract>`_
 - `workspace <https://github.com/stellar/soroban-examples/tree/main/workspace>`_
 
 Want to add support for one of the remaining examples? Open a pull request against `hyperledger-solang/solang <https://github.com/hyperledger-solang/solang>`_ and follow the `contribution guide <https://github.com/hyperledger-solang/solang/blob/main/CONTRIBUTING.md>`_.
