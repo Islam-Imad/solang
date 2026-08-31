@@ -1389,6 +1389,45 @@ pub(crate) fn soroban_host_call(
     }
 }
 
+pub(crate) fn soroban_address_compare(
+    loc: &pt::Loc,
+    left: Expression,
+    right: Expression,
+    equal: bool,
+    cfg: &mut ControlFlowGraph,
+    vartab: &mut Vartable,
+) -> Expression {
+    let ordering = soroban_host_call(
+        loc,
+        "obj_cmp",
+        HostFunctions::ObjCmp,
+        &Type::Int(64),
+        vec![left, right],
+        cfg,
+        vartab,
+    );
+
+    let zero = Expression::NumberLiteral {
+        loc: *loc,
+        ty: Type::Int(64),
+        value: BigInt::zero(),
+    };
+
+    if equal {
+        Expression::Equal {
+            loc: *loc,
+            left: Box::new(ordering),
+            right: Box::new(zero),
+        }
+    } else {
+        Expression::NotEqual {
+            loc: *loc,
+            left: Box::new(ordering),
+            right: Box::new(zero),
+        }
+    }
+}
+
 pub(super) fn validate_accessor_abi_types(contract_no: usize, ns: &mut Namespace) {
     for variable in &ns.contracts[contract_no].variables {
         if !matches!(variable.visibility, pt::Visibility::Public(_)) {

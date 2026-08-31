@@ -158,6 +158,7 @@ pub enum HostFunctions {
     ContractEvent,
     SerializeToBytes,
     DeserializeFromBytes,
+    ObjCmp,
 }
 
 impl HostFunctions {
@@ -225,6 +226,7 @@ impl HostFunctions {
             HostFunctions::ContractEvent => "x.1",
             HostFunctions::SerializeToBytes => "b._",
             HostFunctions::DeserializeFromBytes => "b.0",
+            HostFunctions::ObjCmp => "x.0",
             HostFunctions::VecLen => "v.3",
             HostFunctions::VecPopBack => "v.7",
             HostFunctions::VecGet => "v.1",

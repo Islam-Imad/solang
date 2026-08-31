@@ -209,6 +209,10 @@ impl HostFunctions {
             HostFunctions::DeserializeFromBytes => {
                 bin.context.i64_type().fn_type(&[ty.into()], false)
             }
+            HostFunctions::ObjCmp => bin
+                .context
+                .i64_type()
+                .fn_type(&[ty.into(), ty.into()], false),
         }
     }
 }
@@ -582,6 +586,7 @@ impl SorobanTarget {
             HostFunctions::ComputeHashKeccak256,
             HostFunctions::SerializeToBytes,
             HostFunctions::DeserializeFromBytes,
+            HostFunctions::ObjCmp,
         ];
 
         for func in &host_functions {
