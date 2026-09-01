@@ -616,6 +616,10 @@ impl<'a> TargetRuntime<'a> for SorobanTarget {
         let ret_data = bin.vector_bytes(ret_vector);
         bin.builder.build_store(ret_data, call_res).unwrap();
         *bin.return_data.borrow_mut() = Some(ret_vector.into_pointer_value());
+
+        if let Some(success) = success {
+            *success = bin.context.i32_type().const_int(1, false).into();
+        }
     }
 
     /// send value to address

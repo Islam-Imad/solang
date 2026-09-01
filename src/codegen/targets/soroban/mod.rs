@@ -338,6 +338,35 @@ impl TargetCodegen for SorobanTarget {
                     Some(Type::Bytes(32)),
                 ))
             }
+            ast::Builtin::ToXdr => {
+                assert_eq!(args.len(), 1, "to_xdr takes exactly one argument");
+                let input = expression(&args[0], cfg, contract_no, func, ns, vartab, opt, self);
+                let val = soroban_encode_arg(input, cfg, vartab, ns);
+                let xdr_obj = vartab.temp_name("xdr_bytes", &Type::Uint(64));
+                cfg.add(
+                    vartab,
+                    Instr::Call {
+                        res: vec![xdr_obj],
+                        call: InternalCallTy::HostFunction {
+                            name: HostFunctions::SerializeToBytes.name().to_string(),
+                        },
+                        args: vec![val],
+                        return_tys: vec![Type::Uint(64)],
+                    },
+                );
+                let xdr_expr = Expression::Variable {
+                    loc: pt::Loc::Codegen,
+                    ty: Type::Uint(64),
+                    var_no: xdr_obj,
+                };
+                Some(soroban_decode_arg(
+                    xdr_expr,
+                    cfg,
+                    vartab,
+                    ns,
+                    Some(Type::DynamicBytes),
+                ))
+            }
             ast::Builtin::Timestamp => {
                 assert_eq!(args.len(), 0, "timestamp expects no arguments");
                 let timestamp_var_no = vartab.temp_name("timestamp", &Type::Uint(64));
