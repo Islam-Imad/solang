@@ -40,6 +40,9 @@ Documented Counterparts
    * - `deep_contract_auth <https://github.com/stellar/soroban-examples/tree/main/deep_contract_auth>`_
      - `docs/examples/soroban/deep_auth <https://github.com/hyperledger-solang/solang/tree/main/docs/examples/soroban/deep_auth>`_
      - Nested contract authorization via ``authAsCurrContract(...)``.
+   * - `eth_abi <https://github.com/stellar/soroban-examples/tree/main/eth_abi>`_
+     - `docs/examples/soroban/eth_abi.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/eth_abi.sol>`_ and `tests/soroban_testcases/example_eth_abi.rs <https://github.com/hyperledger-solang/solang/blob/main/tests/soroban_testcases/example_eth_abi.rs>`_
+     - ABI codec round-trip: decode an ``Input`` struct (``bytes32``, two ``uint256``), compute ``Output{a, b + c}``, and re-encode it. Faithful to the upstream *logic* using ``abi.encode``/``abi.decode``, but note the codec is Soroban-native, not Ethereum's 32-byte-word ABI: an encoded buffer holds live host-object handles (a struct becomes a Map object, ``bytes32`` a Bytes object, ``uint256`` a 256-bit-integer object), so the encode → ``exec`` → decode chain must stay inside a single invocation. Tested via ``example_eth_abi_*`` test cases.
    * - `hello_world <https://github.com/stellar/soroban-examples/tree/main/hello_world>`_
      - `docs/examples/soroban/hello_world.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/hello_world.sol>`_ and `tests/soroban_testcases/example_hello_world.rs <https://github.com/hyperledger-solang/solang/blob/main/tests/soroban_testcases/example_hello_world.rs>`_
      - Minimal ``hello(string) -> string[]`` contract mirroring the upstream ``String -> Vec<String>`` example: returns ``["Hello", <name>]``. Demonstrates a ``string`` parameter and a ``string[]`` return value over the Soroban ABI. Tested via ``example_hello_world_*`` test cases.
@@ -617,6 +620,33 @@ serialize with this contract's exact field names.
         }
     }
 
+eth_abi
+^^^^^^^
+
+Upstream Soroban example: `eth_abi <https://github.com/stellar/soroban-examples/tree/main/eth_abi>`_
+
+Solang Solidity example: `docs/examples/soroban/eth_abi.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/eth_abi.sol>`_
+
+The upstream example decodes an ABI-encoded ``Input``, computes an ``Output`` whose ``r`` is the sum of the two input words, and returns the ABI-encoded ``Output``. The port keeps that logic in ``exec`` using ``abi.decode``/``abi.encode``. On the Soroban target these builtins operate on Soroban's native value model rather than Ethereum's 32-byte-word ABI: an encoded buffer carries live host-object handles (a struct becomes one Map object, ``bytes32`` a Bytes object, ``uint256`` a 256-bit-integer object), not portable padded words. Those handles are only valid within the invocation that produced them, so the ``run`` driver performs the whole encode → ``exec`` → decode chain in a single call.
+
+.. code-block:: solidity
+
+    contract EthAbi {
+        struct Input  { bytes32 a; uint256 b; uint256 c; }
+        struct Output { bytes32 a; uint256 r; }
+
+        function exec(bytes memory input) public pure returns (bytes memory) {
+            Input memory i = abi.decode(input, (Input));
+            return abi.encode(Output(i.a, i.b + i.c));
+        }
+
+        function run(bytes32 a, uint256 b, uint256 c) public pure returns (Output memory) {
+            bytes memory input = abi.encode(Input(a, b, c));
+            bytes memory output = exec(input);
+            return abi.decode(output, (Output));
+        }
+    }
+
 Upstream Examples Not Yet Documented as Supported
 +++++++++++++++++++++++++++++++++++++++++++++++++
 
@@ -624,7 +654,6 @@ The following upstream examples do not currently have a documented Solidity coun
 - `bls_signature <https://github.com/stellar/soroban-examples/tree/main/bls_signature>`_
 - `deployer <https://github.com/stellar/soroban-examples/tree/main/deployer>`_
 - `errors <https://github.com/stellar/soroban-examples/tree/main/errors>`_
-- `eth_abi <https://github.com/stellar/soroban-examples/tree/main/eth_abi>`_
 - `fuzzing <https://github.com/stellar/soroban-examples/tree/main/fuzzing>`_
 - `mint-lock <https://github.com/stellar/soroban-examples/tree/main/mint-lock>`_
 - `privacy-pools <https://github.com/stellar/soroban-examples/tree/main/privacy-pools>`_
