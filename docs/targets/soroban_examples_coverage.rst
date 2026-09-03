@@ -61,6 +61,9 @@ Documented Counterparts
    * - `merkle_distribution <https://github.com/stellar/soroban-examples/tree/main/merkle_distribution>`_
      - `docs/examples/soroban/merkle_distribution.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/merkle_distribution.sol>`_ and `tests/soroban_testcases/example_merkle_distribution.rs <https://github.com/hyperledger-solang/solang/blob/main/tests/soroban_testcases/example_merkle_distribution.rs>`_
      - Merkle-proof airdrop: recipients claim tokens by supplying a Merkle proof against a stored root, and verified claims trigger a cross-contract token transfer. Demonstrates ``sha256`` hashing, the ``to_xdr`` builtin for canonical XDR leaf serialization, ``bytes.concat`` for a real 64-byte inner-node preimage, a ``bytes32[]`` proof parameter, a ``mapping(uint32 => bool)`` claimed-set, and cross-contract ``call`` via ``abi.encode``. The leaf preimage is ``sha256(to_xdr(Receiver{index, recipient, amount}))``, mirroring upstream's ``sha256(Receiver.to_xdr())``; it differs only in the field name ``recipient`` (Solidity reserves ``address``), which changes the struct's ScMap keys, so off-chain tree builders must serialize with this contract's exact struct. Tested via ``merkle_distribution_*`` test cases.
+   * - `mint-lock <https://github.com/stellar/soroban-examples/tree/main/mint-lock>`_
+     - `docs/examples/soroban/mint_lock.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/mint_lock.sol>`_ and `tests/soroban_testcases/example_mint_lock.rs <https://github.com/hyperledger-solang/solang/blob/main/tests/soroban_testcases/example_mint_lock.rs>`_
+     - Admin-controlled minting proxy: an admin authorizes per-contract minters, each with a per-epoch limit, and every mint is dispatched as a cross-contract ``call`` into the wrapped token. Demonstrates deeply nested mappings of structs (``minters`` and the four-level ``stats``), ``block.number`` as the epoch source, struct storage and struct ABI return (``MinterInfo``), ``requireAuth()`` on the admin and ``requireAuthForArgs(contract_, to, amount)`` scoping the minter's authorization to the exact arguments it signs (mirroring upstream's ``require_auth_for_args``), address ``==`` comparison, and ``require``-based guards. The per-epoch ``stats`` use ``persistent`` rather than upstream's ``temporary`` storage: a temporary entry would be evicted once the ledger sequence advances past its (un-extended) TTL, which the tests trigger by jumping to mid-epoch. Tested via ``mint_lock_*`` test cases.
    * - `timelock <https://github.com/stellar/soroban-examples/tree/main/timelock>`_
      - `docs/examples/soroban/timelock <https://github.com/hyperledger-solang/solang/tree/main/docs/examples/soroban/timelock>`_
      - Timelock-style example using enums, mappings, authorization, and ``block.timestamp``.
@@ -647,6 +650,107 @@ The upstream example decodes an ABI-encoded ``Input``, computes an ``Output`` wh
         }
     }
 
+mint-lock
+^^^^^^^^^
+
+Upstream Soroban example: `mint-lock <https://github.com/stellar/soroban-examples/tree/main/mint-lock>`_
+
+Solang Solidity example: `docs/examples/soroban/mint_lock.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/mint_lock.sol>`_
+
+An admin-controlled minting proxy. The admin authorizes minters against a wrapped token, each with a per-epoch limit; the admin can always mint, an authorized minter can mint until it exhausts the epoch's limit, and anyone else is rejected. The upstream composite storage keys become nested mappings (``minters[contract_][minter_]`` and the four-level ``stats[contract_][minter_][epoch_length][epoch]``), the epoch is derived from ``block.number`` (Soroban's ledger sequence), and each mint is dispatched with ``contract_.call(abi.encode("mint", to, amount))``. The minter authorizes the mint with ``requireAuthForArgs(contract_, to, amount)`` — the ``require_auth_for_args`` mapping that scopes the signed authorization to those exact arguments instead of the full call argument list that ``requireAuth()`` would demand — while ``set_admin``/``set_minter`` gate on the admin's ``requireAuth()``. The per-epoch ``stats`` are declared ``persistent`` rather than ``temporary``: a temporary entry would be evicted once the ledger sequence advances past its un-extended TTL, and the tests jump the sequence to mid-epoch.
+
+.. code-block:: solidity
+
+    contract mint_lock {
+        struct MinterConfig {
+            int128 limit;
+            uint32 epoch_length;
+        }
+
+        struct MinterStats {
+            int128 consumed_limit;
+        }
+
+        struct MinterInfo {
+            MinterConfig config;
+            uint32 epoch;
+            MinterStats minter_stats;
+        }
+
+        address instance admin;
+
+        mapping(address => mapping(address => MinterConfig)) persistent minters;
+        mapping(address => mapping(address => bool)) persistent minter_exists;
+
+        mapping(address =>
+            mapping(address =>
+                mapping(uint32 =>
+                    mapping(uint32 => MinterStats)))) persistent stats;
+
+        constructor(address admin_) {
+            admin = admin_;
+        }
+
+        function set_admin(address new_admin) public {
+            admin.requireAuth();
+            admin = new_admin;
+        }
+
+        function get_admin() public view returns (address) {
+            return admin;
+        }
+
+        function set_minter(
+            address contract_,
+            address minter_,
+            MinterConfig memory config
+        ) public {
+            admin.requireAuth();
+            minters[contract_][minter_] = config;
+            minter_exists[contract_][minter_] = true;
+        }
+
+        function minter(address contract_, address minter_)
+            public
+            view
+            returns (MinterInfo memory)
+        {
+            require(minter_exists[contract_][minter_], "not authorized minter");
+            MinterConfig memory config = minters[contract_][minter_];
+            uint32 epoch = uint32(block.number / uint64(config.epoch_length));
+            MinterStats memory minter_stats = stats[contract_][minter_][config.epoch_length][epoch];
+            return MinterInfo({config: config, epoch: epoch, minter_stats: minter_stats});
+        }
+
+        function mint(
+            address contract_,
+            address minter_,
+            address to,
+            int128 amount
+        ) public {
+            minter_.requireAuthForArgs(contract_, to, amount);
+
+            require(amount >= 0, "negative amount");
+
+            // The admin can always mint; everyone else is rate-limited per epoch.
+            if (admin != minter_) {
+                require(minter_exists[contract_][minter_], "not authorized minter");
+                MinterConfig memory config = minters[contract_][minter_];
+
+                uint32 epoch = uint32(block.number / uint64(config.epoch_length));
+                MinterStats memory minter_stats = stats[contract_][minter_][config.epoch_length][epoch];
+                int128 new_consumed = minter_stats.consumed_limit + amount;
+                require(new_consumed <= config.limit, "daily limit insufficient");
+                minter_stats.consumed_limit = new_consumed;
+                stats[contract_][minter_][config.epoch_length][epoch] = minter_stats;
+            }
+
+            // Dispatch the actual mint into the wrapped token contract.
+            bytes memory payload = abi.encode("mint", to, amount);
+            (bool success, bytes memory returndata) = contract_.call(payload);
+        }
+    }
+
 Upstream Examples Not Yet Documented as Supported
 +++++++++++++++++++++++++++++++++++++++++++++++++
 
@@ -655,7 +759,6 @@ The following upstream examples do not currently have a documented Solidity coun
 - `deployer <https://github.com/stellar/soroban-examples/tree/main/deployer>`_
 - `errors <https://github.com/stellar/soroban-examples/tree/main/errors>`_
 - `fuzzing <https://github.com/stellar/soroban-examples/tree/main/fuzzing>`_
-- `mint-lock <https://github.com/stellar/soroban-examples/tree/main/mint-lock>`_
 - `privacy-pools <https://github.com/stellar/soroban-examples/tree/main/privacy-pools>`_
 - `simple_account <https://github.com/stellar/soroban-examples/tree/main/simple_account>`_
 - `workspace <https://github.com/stellar/soroban-examples/tree/main/workspace>`_

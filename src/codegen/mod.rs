@@ -130,6 +130,7 @@ pub enum HostFunctions {
     ObjToI256HiHi,
     ObjFromI256Pieces,
     RequireAuth,
+    RequireAuthForArgs,
     AuthAsCurrContract,
     UpdateCurrentContractWasm,
     MapNew,
@@ -158,6 +159,7 @@ pub enum HostFunctions {
     ContractEvent,
     SerializeToBytes,
     DeserializeFromBytes,
+    ObjCmp,
 }
 
 impl HostFunctions {
@@ -199,6 +201,7 @@ impl HostFunctions {
             HostFunctions::ObjToI256HiHi => "i.j",
             HostFunctions::ObjFromI256Pieces => "i.g",
             HostFunctions::RequireAuth => "a.0",
+            HostFunctions::RequireAuthForArgs => "a._",
             HostFunctions::AuthAsCurrContract => "a.3",
             HostFunctions::UpdateCurrentContractWasm => "l.6",
             HostFunctions::MapNewFromLinearMemory => "m.9",
@@ -225,6 +228,7 @@ impl HostFunctions {
             HostFunctions::ContractEvent => "x.1",
             HostFunctions::SerializeToBytes => "b._",
             HostFunctions::DeserializeFromBytes => "b.0",
+            HostFunctions::ObjCmp => "x.0",
             HostFunctions::VecLen => "v.3",
             HostFunctions::VecPopBack => "v.7",
             HostFunctions::VecGet => "v.1",

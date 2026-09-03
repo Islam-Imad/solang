@@ -94,6 +94,10 @@ impl HostFunctions {
             HostFunctions::ObjToI64 => bin.context.i64_type().fn_type(&[ty.into()], false),
             HostFunctions::ObjFromI64 => bin.context.i64_type().fn_type(&[ty.into()], false),
             HostFunctions::RequireAuth => bin.context.i64_type().fn_type(&[ty.into()], false),
+            HostFunctions::RequireAuthForArgs => bin
+                .context
+                .i64_type()
+                .fn_type(&[ty.into(), ty.into()], false),
             HostFunctions::AuthAsCurrContract => {
                 bin.context.i64_type().fn_type(&[ty.into()], false)
             }
@@ -209,6 +213,10 @@ impl HostFunctions {
             HostFunctions::DeserializeFromBytes => {
                 bin.context.i64_type().fn_type(&[ty.into()], false)
             }
+            HostFunctions::ObjCmp => bin
+                .context
+                .i64_type()
+                .fn_type(&[ty.into(), ty.into()], false),
         }
     }
 }
@@ -550,6 +558,7 @@ impl SorobanTarget {
             HostFunctions::ObjToI256HiHi,
             HostFunctions::ObjFromI256Pieces,
             HostFunctions::RequireAuth,
+            HostFunctions::RequireAuthForArgs,
             HostFunctions::AuthAsCurrContract,
             HostFunctions::UpdateCurrentContractWasm,
             HostFunctions::MapNewFromLinearMemory,
@@ -582,6 +591,7 @@ impl SorobanTarget {
             HostFunctions::ComputeHashKeccak256,
             HostFunctions::SerializeToBytes,
             HostFunctions::DeserializeFromBytes,
+            HostFunctions::ObjCmp,
         ];
 
         for func in &host_functions {

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 mod abi_encode;
+mod address_compare;
 mod alloc;
 mod array_args;
 mod array_bytes_strings;
@@ -28,6 +29,7 @@ mod example_events;
 mod example_hello_world;
 mod example_increment_with_pause;
 mod example_merkle_distribution;
+mod example_mint_lock;
 mod example_other_custom_types;
 mod example_pause;
 mod example_single_offer;

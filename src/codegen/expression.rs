@@ -17,8 +17,8 @@ use crate::codegen::targets::soroban::bytes::{
     soroban_bytes_length, soroban_bytes_subscript_read, soroban_strings_length,
 };
 use crate::codegen::targets::soroban::{
-    soroban_storage_array_length_ast, soroban_storage_assign, soroban_storage_incdec,
-    soroban_storage_load,
+    soroban_address_compare, soroban_storage_array_length_ast, soroban_storage_assign,
+    soroban_storage_incdec, soroban_storage_load,
 };
 use crate::codegen::unused_variable::should_remove_assignment;
 use crate::codegen::{Builtin, Expression};
@@ -393,52 +393,30 @@ pub fn expression(
             )),
             signed: *sign,
         },
-        ast::Expression::Equal { loc, left, right } => Expression::Equal {
-            loc: *loc,
-            left: Box::new(expression(
-                left,
-                cfg,
-                contract_no,
-                func,
-                ns,
-                vartab,
-                opt,
-                target,
-            )),
-            right: Box::new(expression(
-                right,
-                cfg,
-                contract_no,
-                func,
-                ns,
-                vartab,
-                opt,
-                target,
-            )),
-        },
-        ast::Expression::NotEqual { loc, left, right } => Expression::NotEqual {
-            loc: *loc,
-            left: Box::new(expression(
-                left,
-                cfg,
-                contract_no,
-                func,
-                ns,
-                vartab,
-                opt,
-                target,
-            )),
-            right: Box::new(expression(
-                right,
-                cfg,
-                contract_no,
-                func,
-                ns,
-                vartab,
-                opt,
-                target,
-            )),
-        },
+        ast::Expression::Equal { loc, left, right } => {
+            let l = expression(left, cfg, contract_no, func, ns, vartab, opt, target);
+            let r = expression(right, cfg, contract_no, func, ns, vartab, opt, target);
+            if ns.target == Target::Soroban && l.ty().is_address() {
+                return soroban_address_compare(loc, l, r, true, cfg, vartab);
+            }
+            Expression::Equal {
+                loc: *loc,
+                left: Box::new(l),
+                right: Box::new(r),
+            }
+        }
+        ast::Expression::NotEqual { loc, left, right } => {
+            let l = expression(left, cfg, contract_no, func, ns, vartab, opt, target);
+            let r = expression(right, cfg, contract_no, func, ns, vartab, opt, target);
+            if ns.target == Target::Soroban && l.ty().is_address() {
+                return soroban_address_compare(loc, l, r, false, cfg, vartab);
+            }
+            Expression::NotEqual {
+                loc: *loc,
+                left: Box::new(l),
+                right: Box::new(r),
+            }
+        }
         ast::Expression::More { loc, left, right } => {
             let l = expression(left, cfg, contract_no, func, ns, vartab, opt, target);
             let r = expression(right, cfg, contract_no, func, ns, vartab, opt, target);
