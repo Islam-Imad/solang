@@ -77,9 +77,9 @@ Soroban Features
    * - Soroban utilities
      - Supported
      - ``block.timestamp``. Example: `timelock.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/timelock/timelock.sol>`_.
-   * - Creating contracts with ``new``
-     - Unsupported
-     - Contract creation from Solidity is not supported on Soroban.
+   * - Deploying contracts
+     - Partial support
+     - Programmatic deployment via the ``deployContract(bytes32 wasm_hash, bytes32 salt, ...args)`` builtin, which deploys an already-uploaded Wasm blob (by hash) on behalf of the current contract and runs its constructor, mapping to the host function ``create_contract_with_constructor``. Example: `deployer <https://github.com/hyperledger-solang/solang/tree/main/docs/examples/soroban/deployer>`_. Solidity's ``new Contract()`` syntax (deploying a compile-time-known contract) is not yet supported.
    * - Native value transfer and payable-style flows
      - Unsupported
      - This is not part of the documented Solang support surface on Soroban.

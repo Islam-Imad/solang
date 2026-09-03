@@ -24,6 +24,7 @@ mod dynarray_elemops_struct;
 mod events;
 mod example_atomic_multiswap;
 mod example_custom_types;
+mod example_deployer;
 mod example_eth_abi;
 mod example_events;
 mod example_hello_world;

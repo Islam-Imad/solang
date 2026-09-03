@@ -104,6 +104,10 @@ impl HostFunctions {
             HostFunctions::UpdateCurrentContractWasm => {
                 bin.context.i64_type().fn_type(&[ty.into()], false)
             }
+            HostFunctions::CreateContractWithConstructor => bin
+                .context
+                .i64_type()
+                .fn_type(&[ty.into(), ty.into(), ty.into(), ty.into()], false),
             HostFunctions::MapNewFromLinearMemory => bin
                 .context
                 .i64_type()
@@ -561,6 +565,7 @@ impl SorobanTarget {
             HostFunctions::RequireAuthForArgs,
             HostFunctions::AuthAsCurrContract,
             HostFunctions::UpdateCurrentContractWasm,
+            HostFunctions::CreateContractWithConstructor,
             HostFunctions::MapNewFromLinearMemory,
             HostFunctions::MapNew,
             HostFunctions::MapPut,

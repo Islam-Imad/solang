@@ -36,7 +36,7 @@ pub struct Prototype {
 }
 
 // A list of all Solidity builtins functions
-pub static BUILTIN_FUNCTIONS: Lazy<[Prototype; 31]> = Lazy::new(|| {
+pub static BUILTIN_FUNCTIONS: Lazy<[Prototype; 32]> = Lazy::new(|| {
     [
         Prototype {
             builtin: Builtin::ExtendInstanceTtl,
@@ -58,6 +58,17 @@ pub static BUILTIN_FUNCTIONS: Lazy<[Prototype; 31]> = Lazy::new(|| {
             ret: vec![],
             target: vec![Target::Soroban],
             doc: "Replaces the running contract's Wasm code with the module identified by the given 32-byte hash (an already-uploaded Wasm blob). Maps to the host function `update_current_contract_wasm`. The upgrade takes effect after the current invocation completes.",
+            constant: false,
+        },
+        Prototype {
+            builtin: Builtin::DeployContract,
+            namespace: None,
+            method: vec![],
+            name: "deployContract",
+            params: vec![Type::Bytes(32), Type::Bytes(32)],
+            ret: vec![Type::Address(false)],
+            target: vec![Target::Soroban],
+            doc: "Deploys an already-uploaded Wasm blob (identified by its 32-byte hash) on behalf of the current contract, using `salt` to derive the new contract address, and invokes its constructor with the given arguments. Maps to the host function `create_contract_with_constructor`. Returns the deployed contract's address.",
             constant: false,
         },
         Prototype {
@@ -1018,6 +1029,42 @@ pub(super) fn resolve_call(
     symtable: &mut Symtable,
     diagnostics: &mut Diagnostics,
 ) -> Result<Expression, ()> {
+    if namespace.is_none() && id == "deployContract" && ns.target == Target::Soroban {
+        if args.len() < 2 {
+            diagnostics.push(Diagnostic::error(
+                *loc,
+                format!(
+                    "builtin function 'deployContract' expects at least 2 arguments (wasm hash and salt), {} provided",
+                    args.len()
+                ),
+            ));
+            return Err(());
+        }
+
+        let mut resolved_args = Vec::with_capacity(args.len());
+        for arg in &args[..2] {
+            let expr = expression(
+                arg,
+                context,
+                ns,
+                symtable,
+                diagnostics,
+                ResolveTo::Type(&Type::Bytes(32)),
+            )?;
+            resolved_args.push(expr.cast(&arg.loc(), &Type::Bytes(32), true, ns, diagnostics)?);
+        }
+        for arg in &args[2..] {
+            resolved_args.push(resolve_encode_arg(arg, context, ns, symtable, diagnostics)?);
+        }
+
+        return Ok(Expression::Builtin {
+            loc: *loc,
+            tys: vec![Type::Address(false)],
+            kind: Builtin::DeployContract,
+            args: resolved_args,
+        });
+    }
+
     if namespace.is_none() && id == "to_xdr" {
         if args.len() != 1 {
             diagnostics.push(Diagnostic::error(
