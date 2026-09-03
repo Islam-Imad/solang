@@ -67,7 +67,7 @@ Soroban Features
      - Details and examples
    * - Authorization
      - Supported
-     - ``address.requireAuth()`` and ``auth.authAsCurrContract(...)``. Examples: `auth.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/auth.sol>`_, `token.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/token.sol>`_, `timelock.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/timelock/timelock.sol>`_, and `deep_auth <https://github.com/hyperledger-solang/solang/tree/main/docs/examples/soroban/deep_auth>`_.
+     - ``address.requireAuth()``, ``address.requireAuthForArgs(...)`` (scopes the authorization to an explicit argument list, mapping to the host's ``require_auth_for_args``), and ``auth.authAsCurrContract(...)``. Examples: `auth.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/auth.sol>`_, `token.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/token.sol>`_, `timelock.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/timelock/timelock.sol>`_, `mint_lock.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/mint_lock.sol>`_, and `deep_auth <https://github.com/hyperledger-solang/solang/tree/main/docs/examples/soroban/deep_auth>`_.
    * - Cross-contract calls
      - Supported
      - ``address.call(...)`` and the documented ABI encode/decode flows around it. Examples: `deep_auth <https://github.com/hyperledger-solang/solang/tree/main/docs/examples/soroban/deep_auth>`_ and `cross_contract.spec.js <https://github.com/hyperledger-solang/solang/blob/main/integration/soroban/cross_contract.spec.js>`_.

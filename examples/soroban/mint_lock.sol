@@ -69,10 +69,11 @@ contract mint_lock {
         address to,
         int128 amount
     ) public {
-        minter_.requireAuth();
+        minter_.requireAuthForArgs(contract_, to, amount);
 
         require(amount >= 0, "negative amount");
 
+        // The admin can always mint; everyone else is rate-limited per epoch.
         if (admin != minter_) {
             require(minter_exists[contract_][minter_], "not authorized minter");
             MinterConfig memory config = minters[contract_][minter_];
@@ -85,6 +86,7 @@ contract mint_lock {
             stats[contract_][minter_][config.epoch_length][epoch] = minter_stats;
         }
 
+        // Dispatch the actual mint into the wrapped token contract.
         bytes memory payload = abi.encode("mint", to, amount);
         (bool success, bytes memory returndata) = contract_.call(payload);
     }

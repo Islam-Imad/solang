@@ -1500,6 +1500,34 @@ pub(super) fn resolve_method_call(
 ) -> Result<Option<Expression>, ()> {
     let expr_ty = expr.ty();
     let deref_ty = expr_ty.deref_memory();
+
+    if id.name == "requireAuthForArgs" && ns.target == Target::Soroban {
+        let is_address = matches!(deref_ty, Type::Address(_))
+            || matches!(&expr_ty, Type::StorageRef(_, inner) if matches!(**inner, Type::Address(_)));
+
+        if is_address {
+            let mut resolved_args = vec![expr.cast(&id.loc, deref_ty, true, ns, diagnostics)?];
+
+            for arg in args {
+                resolved_args.push(expression(
+                    arg,
+                    context,
+                    ns,
+                    symtable,
+                    diagnostics,
+                    ResolveTo::Unknown,
+                )?);
+            }
+
+            return Ok(Some(Expression::Builtin {
+                loc: id.loc,
+                tys: vec![Type::Void],
+                kind: Builtin::RequireAuthForArgs,
+                args: resolved_args,
+            }));
+        }
+    }
+
     let funcs: Vec<_> = BUILTIN_METHODS
         .iter()
         .filter(|func| func.name == id.name && func.method.contains(deref_ty))

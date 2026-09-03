@@ -1839,6 +1839,7 @@ pub enum Builtin {
     TypeRuntimeCode,
     TypeCreatorCode,
     RequireAuth,
+    RequireAuthForArgs,
     AuthAsCurrContract,
     UpdateCurrentContractWasm,
     ExtendTtl,

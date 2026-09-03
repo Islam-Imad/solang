@@ -2,7 +2,9 @@
 
 use crate::SorobanEnv;
 use soroban_sdk::{
-    contracttype, testutils::Address as _, testutils::Ledger, Address, FromVal, IntoVal, Val,
+    contracttype,
+    testutils::{Address as _, Ledger, MockAuth, MockAuthInvoke},
+    Address, FromVal, IntoVal, Val,
 };
 
 const MINT_LOCK_SRC: &str = r#"
@@ -73,7 +75,7 @@ contract mint_lock {
         address to,
         int128 amount
     ) public {
-        minter_.requireAuth();
+        minter_.requireAuthForArgs(contract_, to, amount);
 
         require(amount >= 0, "negative amount");
 
@@ -412,6 +414,107 @@ fn mint_lock_disallows_negative_amount_from_minter() {
     assert_eq!(info.config, config);
     assert_eq!(info.epoch, LEDGER_EPOCH);
     assert_eq!(info.minter_stats.consumed_limit, 0);
+}
+
+#[test]
+fn mint_lock_require_auth_for_args_scopes_args() {
+    let mut runtime = SorobanEnv::new();
+    let admin = Address::generate(&runtime.env);
+    let minter = Address::generate(&runtime.env);
+    let user = Address::generate(&runtime.env);
+
+    let token = runtime.deploy_contract(MINT_TARGET_SRC);
+    let lock = deploy_lock(&mut runtime, &admin);
+
+    runtime.env.ledger().set_sequence_number(MID_EPOCH_SEQUENCE);
+
+    let config = MinterConfig {
+        limit: 100,
+        epoch_length: EPOCH_LENGTH,
+    };
+    runtime.env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &lock,
+            fn_name: "set_minter",
+            args: (token.clone(), minter.clone(), config.clone()).into_val(&runtime.env),
+            sub_invokes: &[],
+        },
+    }]);
+    set_minter(&runtime, &lock, &token, &minter, &config);
+
+    runtime.env.mock_auths(&[MockAuth {
+        address: &minter,
+        invoke: &MockAuthInvoke {
+            contract: &lock,
+            fn_name: "mint",
+            args: (token.clone(), user.clone(), 40i128).into_val(&runtime.env),
+            sub_invokes: &[],
+        },
+    }]);
+    mint(&runtime, &lock, &token, &minter, &user, 40);
+
+    assert_eq!(balance_of(&runtime, &token, &user), 40);
+    assert_eq!(
+        minter_info(&runtime, &lock, &token, &minter)
+            .minter_stats
+            .consumed_limit,
+        40
+    );
+}
+
+#[test]
+fn mint_lock_require_auth_for_args_rejects_mismatched_args() {
+    let mut runtime = SorobanEnv::new();
+    let admin = Address::generate(&runtime.env);
+    let minter = Address::generate(&runtime.env);
+    let user = Address::generate(&runtime.env);
+
+    let token = runtime.deploy_contract(MINT_TARGET_SRC);
+    let lock = deploy_lock(&mut runtime, &admin);
+
+    runtime.env.ledger().set_sequence_number(MID_EPOCH_SEQUENCE);
+
+    let config = MinterConfig {
+        limit: 100,
+        epoch_length: EPOCH_LENGTH,
+    };
+    runtime.env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &MockAuthInvoke {
+            contract: &lock,
+            fn_name: "set_minter",
+            args: (token.clone(), minter.clone(), config.clone()).into_val(&runtime.env),
+            sub_invokes: &[],
+        },
+    }]);
+    set_minter(&runtime, &lock, &token, &minter, &config);
+
+    // The minter authorizes minting 40 to `user`...
+    runtime.env.mock_auths(&[MockAuth {
+        address: &minter,
+        invoke: &MockAuthInvoke {
+            contract: &lock,
+            fn_name: "mint",
+            args: (token.clone(), user.clone(), 40i128).into_val(&runtime.env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    let logs = try_mint(&runtime, &lock, &token, &minter, &user, 41);
+    assert!(
+        logs.iter().any(|e| e.to_lowercase().contains("auth")),
+        "expected an authorization failure, got logs: {logs:?}"
+    );
+
+    // Nothing was minted and the epoch's consumed limit stayed at zero.
+    assert_eq!(balance_of(&runtime, &token, &user), 0);
+    assert_eq!(
+        minter_info(&runtime, &lock, &token, &minter)
+            .minter_stats
+            .consumed_limit,
+        0
+    );
 }
 
 #[test]

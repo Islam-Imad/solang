@@ -466,6 +466,77 @@ impl TargetCodegen for SorobanTarget {
 
                 Some(var)
             }
+
+            ast::Builtin::RequireAuthForArgs => {
+                // args[0] is the address; handle a storage address like requireAuth.
+                let addr = if let Type::StorageRef(_, _) = args[0].ty() {
+                    soroban_storage_load(
+                        loc,
+                        &args[0],
+                        &Type::Address(false),
+                        cfg,
+                        contract_no,
+                        func,
+                        ns,
+                        vartab,
+                        opt,
+                        self,
+                    )
+                } else {
+                    expression(&args[0], cfg, contract_no, func, ns, vartab, opt, self)
+                };
+
+                let mut args_vec = soroban_host_call(
+                    loc,
+                    "auth_args_vec",
+                    HostFunctions::VectorNew,
+                    &Type::Uint(64),
+                    vec![],
+                    cfg,
+                    vartab,
+                );
+
+                for arg in args.iter().skip(1) {
+                    let arg = expression(arg, cfg, contract_no, func, ns, vartab, opt, self);
+                    let encoded = soroban_encode_arg(arg, cfg, vartab, ns);
+                    args_vec = soroban_host_call(
+                        loc,
+                        "auth_args_vec",
+                        HostFunctions::VecPushBack,
+                        &Type::Uint(64),
+                        vec![args_vec, encoded],
+                        cfg,
+                        vartab,
+                    );
+                }
+
+                let var_temp = vartab.temp(
+                    &pt::Identifier {
+                        name: "auth".to_owned(),
+                        loc: *loc,
+                    },
+                    &Type::Bool,
+                );
+                let var = Expression::Variable {
+                    loc: *loc,
+                    ty: Type::Address(false),
+                    var_no: var_temp,
+                };
+
+                cfg.add(
+                    vartab,
+                    Instr::Call {
+                        res: vec![var_temp],
+                        return_tys: vec![Type::Void],
+                        call: InternalCallTy::HostFunction {
+                            name: HostFunctions::RequireAuthForArgs.name().to_string(),
+                        },
+                        args: vec![addr, args_vec],
+                    },
+                );
+
+                Some(var)
+            }
             // This is the trickiest host function to implement. The reason is takes `InvokerContractAuthEntry` enum as an argument.
             // let x = SubContractInvocation {
             //     context: ContractContext {
