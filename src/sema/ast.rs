@@ -1842,6 +1842,7 @@ pub enum Builtin {
     RequireAuthForArgs,
     AuthAsCurrContract,
     UpdateCurrentContractWasm,
+    DeployContract,
     ExtendTtl,
     ExtendInstanceTtl,
     ToXdr,

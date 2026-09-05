@@ -751,12 +751,54 @@ An admin-controlled minting proxy. The admin authorizes minters against a wrappe
         }
     }
 
+deployer
+^^^^^^^^
+
+Upstream Soroban example: `deployer <https://github.com/stellar/soroban-examples/tree/main/deployer>`_
+
+Solang Solidity example: `docs/examples/soroban/deployer <https://github.com/hyperledger-solang/solang/tree/main/docs/examples/soroban/deployer>`_
+
+A factory contract. The admin-gated ``deploy`` deploys an already-uploaded Wasm blob — identified by its 32-byte ``wasm_hash`` — on behalf of the factory, deriving the new contract's address from ``salt``, and runs the deployed contract's constructor with the supplied arguments. This maps to the ``deployContract(wasm_hash, salt, ...args)`` builtin, which lowers to the host function ``create_contract_with_constructor`` using the current contract address as the deployer (as in upstream's ``env.deployer().with_address(env.current_contract_address(), salt).deploy_v2(...)``). Because Soroban deploys by Wasm hash rather than embedding child code the way the EVM does, the deployed contract's Wasm must already be uploaded to the ledger; only its hash is passed here. The trailing arguments (``init_value`` below) are marshalled into the constructor-args vector.
+
+.. code-block:: solidity
+
+    contract deployer {
+        address instance admin;
+
+        constructor(address admin_) {
+            admin = admin_;
+        }
+
+        function deploy(bytes32 wasm_hash, bytes32 salt, uint32 init_value)
+            public
+            returns (address)
+        {
+            admin.requireAuth();
+            return deployContract(wasm_hash, salt, init_value);
+        }
+    }
+
+The contract that gets deployed simply stores its constructor argument so a caller can confirm the constructor ran:
+
+.. code-block:: solidity
+
+    contract deployed {
+        uint32 instance stored_value;
+
+        constructor(uint32 value) {
+            stored_value = value;
+        }
+
+        function value() public view returns (uint32) {
+            return stored_value;
+        }
+    }
+
 Upstream Examples Not Yet Documented as Supported
 +++++++++++++++++++++++++++++++++++++++++++++++++
 
 The following upstream examples do not currently have a documented Solidity counterpart, as some needed Soroban features are not yet supported.
 - `bls_signature <https://github.com/stellar/soroban-examples/tree/main/bls_signature>`_
-- `deployer <https://github.com/stellar/soroban-examples/tree/main/deployer>`_
 - `errors <https://github.com/stellar/soroban-examples/tree/main/errors>`_
 - `fuzzing <https://github.com/stellar/soroban-examples/tree/main/fuzzing>`_
 - `privacy-pools <https://github.com/stellar/soroban-examples/tree/main/privacy-pools>`_

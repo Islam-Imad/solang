@@ -1049,6 +1049,73 @@ impl TargetCodegen for SorobanTarget {
                     var_no: res,
                 })
             }
+
+            // `deployContract(wasm_hash, salt, args...)` deploys an already-uploaded
+            // Wasm blob on behalf of the current contract and runs its constructor,
+            // mapping to the host's `create_contract_with_constructor(deployer,
+            // wasm_hash, salt, constructor_args)`. The deployer is always the current
+            // contract address (as in `env.deployer().with_address(current, salt)`).
+            ast::Builtin::DeployContract => {
+                // args[0] = wasm hash (bytes32), args[1] = salt (bytes32),
+                // args[2..] = constructor arguments.
+                let deployer = soroban_host_call(
+                    loc,
+                    "deployer_address",
+                    HostFunctions::GetCurrentContractAddress,
+                    &Type::Address(false),
+                    vec![],
+                    cfg,
+                    vartab,
+                );
+
+                let hash_input =
+                    expression(&args[0], cfg, contract_no, func, ns, vartab, opt, self);
+                let wasm_hash = soroban_encode_arg(hash_input, cfg, vartab, ns);
+
+                let salt_input =
+                    expression(&args[1], cfg, contract_no, func, ns, vartab, opt, self);
+                let salt = soroban_encode_arg(salt_input, cfg, vartab, ns);
+
+                // Build the constructor-args VecObject: encode each argument to a
+                // host Val and push it onto a fresh vector (the per-element approach
+                // used to encode arrays). The vector is a raw host handle since the
+                // constructor arguments are heterogeneous.
+                let mut args_vec = soroban_host_call(
+                    loc,
+                    "ctor_args_vec",
+                    HostFunctions::VectorNew,
+                    &Type::Uint(64),
+                    vec![],
+                    cfg,
+                    vartab,
+                );
+                for arg in args.iter().skip(2) {
+                    let arg = expression(arg, cfg, contract_no, func, ns, vartab, opt, self);
+                    let encoded = soroban_encode_arg(arg, cfg, vartab, ns);
+                    // `vec_push_back` returns the new vector; thread it back.
+                    args_vec = soroban_host_call(
+                        loc,
+                        "ctor_args_vec",
+                        HostFunctions::VecPushBack,
+                        &Type::Uint(64),
+                        vec![args_vec, encoded],
+                        cfg,
+                        vartab,
+                    );
+                }
+
+                let deployed = soroban_host_call(
+                    loc,
+                    "deployed_address",
+                    HostFunctions::CreateContractWithConstructor,
+                    &Type::Address(false),
+                    vec![deployer, wasm_hash, salt, args_vec],
+                    cfg,
+                    vartab,
+                );
+
+                Some(deployed)
+            }
             _ => None,
         }
     }
