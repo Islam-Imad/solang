@@ -36,7 +36,7 @@ pub struct Prototype {
 }
 
 // A list of all Solidity builtins functions
-pub static BUILTIN_FUNCTIONS: Lazy<[Prototype; 32]> = Lazy::new(|| {
+pub static BUILTIN_FUNCTIONS: Lazy<[Prototype; 35]> = Lazy::new(|| {
     [
         Prototype {
             builtin: Builtin::ExtendInstanceTtl,
@@ -80,6 +80,42 @@ pub static BUILTIN_FUNCTIONS: Lazy<[Prototype; 32]> = Lazy::new(|| {
             ret: vec![Type::DynamicBytes],
             target: vec![Target::Soroban],
             doc: "Serialize any single value to its canonical XDR `bytes` encoding via the Soroban host function `serialize_to_bytes`. Equivalent to the Soroban SDK's `val.to_xdr(&env)`.",
+            constant: false,
+        },
+        Prototype {
+            builtin: Builtin::Bls12381G1Add,
+            namespace: None,
+            method: vec![],
+            name: "bls12_381_g1_add",
+            params: vec![Type::DynamicBytes, Type::DynamicBytes],
+            ret: vec![Type::DynamicBytes],
+            target: vec![Target::Soroban],
+            doc: "Adds two BLS12-381 G1 points (each 96-byte `bytes` encodings) and returns the resulting G1 point. Maps to the host function `bls12_381_g1_add`.",
+            constant: false,
+        },
+        Prototype {
+            builtin: Builtin::Bls12381G1Mul,
+            namespace: None,
+            method: vec![],
+            name: "bls12_381_g1_mul",
+            params: vec![Type::DynamicBytes, Type::Uint(256)],
+            ret: vec![Type::DynamicBytes],
+            target: vec![Target::Soroban],
+            doc: "Multiplies a BLS12-381 G1 point (96-byte `bytes`) by a scalar (`uint256` Fr element) and returns the resulting G1 point. Maps to the host function `bls12_381_g1_mul`.",
+            constant: false,
+        },
+        Prototype {
+            builtin: Builtin::Bls12381MultiPairingCheck,
+            namespace: None,
+            method: vec![],
+            name: "bls12_381_pairing_check",
+            params: vec![
+                Type::Array(Box::new(Type::DynamicBytes), vec![ArrayLength::Dynamic]),
+                Type::Array(Box::new(Type::DynamicBytes), vec![ArrayLength::Dynamic]),
+            ],
+            ret: vec![Type::Bool],
+            target: vec![Target::Soroban],
+            doc: "Performs the BLS12-381 multi-pairing check on a vector of G1 points (`bytes[]`) and a vector of G2 points (`bytes[]`), returning true if the pairing product equals one. Maps to the host function `bls12_381_multi_pairing_check`.",
             constant: false,
         },
         Prototype {

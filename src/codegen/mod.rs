@@ -161,6 +161,9 @@ pub enum HostFunctions {
     SerializeToBytes,
     DeserializeFromBytes,
     ObjCmp,
+    Bls12381G1Add,
+    Bls12381G1Mul,
+    Bls12381MultiPairingCheck,
 }
 
 impl HostFunctions {
@@ -235,6 +238,9 @@ impl HostFunctions {
             HostFunctions::VecPopBack => "v.7",
             HostFunctions::VecGet => "v.1",
             HostFunctions::VecPut => "v.0",
+            HostFunctions::Bls12381G1Add => "c.5",
+            HostFunctions::Bls12381G1Mul => "c.6",
+            HostFunctions::Bls12381MultiPairingCheck => "c.g",
         }
     }
 }

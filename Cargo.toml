@@ -72,6 +72,11 @@ solang-forge-fmt = { version = "0.2.0", optional = true }
 # build to work.
 ethers-core = { version = "2.0.10", optional = true }
 soroban-sdk = { version = "23.0.0-rc.2.2", features = ["testutils"], optional = true }
+# Test-only: used by the Soroban BLS12-381 example test to build curve points
+# from their affine coordinates. Pinned to the versions already resolved via
+# soroban-env-host so no extra crates are compiled. Gated behind `soroban`.
+ark-bls12-381 = { version = "0.4", optional = true }
+ark-serialize = { version = "0.4", optional = true }
 
 [dev-dependencies]
 num-derive = "0.4"
@@ -101,7 +106,7 @@ no-default-features = true
 lto = true
 
 [features]
-soroban = ["soroban-sdk"]
+soroban = ["soroban-sdk", "ark-bls12-381", "ark-serialize"]
 default = ["llvm", "wasm_opt", "language_server", "soroban"]
 llvm = ["inkwell", "libc"]
 wasm_opt = ["llvm", "wasm-opt", "contract-build"]

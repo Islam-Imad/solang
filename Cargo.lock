@@ -4636,6 +4636,8 @@ name = "solang"
 version = "0.3.5"
 dependencies = [
  "anchor-syn",
+ "ark-bls12-381",
+ "ark-serialize 0.4.2",
  "assert_cmd",
  "base58",
  "bincode",
