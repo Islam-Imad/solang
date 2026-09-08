@@ -27,6 +27,7 @@ mod example_custom_types;
 mod example_deployer;
 mod example_eth_abi;
 mod example_events;
+mod example_groth16_verifier;
 mod example_hello_world;
 mod example_increment_with_pause;
 mod example_merkle_distribution;

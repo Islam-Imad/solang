@@ -367,6 +367,111 @@ impl TargetCodegen for SorobanTarget {
                     Some(Type::DynamicBytes),
                 ))
             }
+            ast::Builtin::Bls12381G1Add => {
+                assert_eq!(
+                    args.len(),
+                    2,
+                    "bls12_381_g1_add takes exactly two arguments"
+                );
+                let a = expression(&args[0], cfg, contract_no, func, ns, vartab, opt, self);
+                let b = expression(&args[1], cfg, contract_no, func, ns, vartab, opt, self);
+                let a_obj = soroban_encode_arg(a, cfg, vartab, ns);
+                let b_obj = soroban_encode_arg(b, cfg, vartab, ns);
+                let res = vartab.temp_name("bls_g1_add", &Type::Uint(64));
+                cfg.add(
+                    vartab,
+                    Instr::Call {
+                        res: vec![res],
+                        call: InternalCallTy::HostFunction {
+                            name: HostFunctions::Bls12381G1Add.name().to_string(),
+                        },
+                        args: vec![a_obj, b_obj],
+                        return_tys: vec![Type::Uint(64)],
+                    },
+                );
+                let res_expr = Expression::Variable {
+                    loc: pt::Loc::Codegen,
+                    ty: Type::Uint(64),
+                    var_no: res,
+                };
+                Some(soroban_decode_arg(
+                    res_expr,
+                    cfg,
+                    vartab,
+                    ns,
+                    Some(Type::DynamicBytes),
+                ))
+            }
+            ast::Builtin::Bls12381G1Mul => {
+                assert_eq!(
+                    args.len(),
+                    2,
+                    "bls12_381_g1_mul takes exactly two arguments"
+                );
+                let point = expression(&args[0], cfg, contract_no, func, ns, vartab, opt, self);
+                let scalar = expression(&args[1], cfg, contract_no, func, ns, vartab, opt, self);
+                let point_obj = soroban_encode_arg(point, cfg, vartab, ns);
+                let scalar_obj = soroban_encode_arg(scalar, cfg, vartab, ns);
+                let res = vartab.temp_name("bls_g1_mul", &Type::Uint(64));
+                cfg.add(
+                    vartab,
+                    Instr::Call {
+                        res: vec![res],
+                        call: InternalCallTy::HostFunction {
+                            name: HostFunctions::Bls12381G1Mul.name().to_string(),
+                        },
+                        args: vec![point_obj, scalar_obj],
+                        return_tys: vec![Type::Uint(64)],
+                    },
+                );
+                let res_expr = Expression::Variable {
+                    loc: pt::Loc::Codegen,
+                    ty: Type::Uint(64),
+                    var_no: res,
+                };
+                Some(soroban_decode_arg(
+                    res_expr,
+                    cfg,
+                    vartab,
+                    ns,
+                    Some(Type::DynamicBytes),
+                ))
+            }
+            ast::Builtin::Bls12381MultiPairingCheck => {
+                assert_eq!(
+                    args.len(),
+                    2,
+                    "bls12_381_pairing_check takes exactly two arguments"
+                );
+                let vp1 = expression(&args[0], cfg, contract_no, func, ns, vartab, opt, self);
+                let vp2 = expression(&args[1], cfg, contract_no, func, ns, vartab, opt, self);
+                let vp1_obj = soroban_encode_arg(vp1, cfg, vartab, ns);
+                let vp2_obj = soroban_encode_arg(vp2, cfg, vartab, ns);
+                let res = vartab.temp_name("bls_pairing_check", &Type::Uint(64));
+                cfg.add(
+                    vartab,
+                    Instr::Call {
+                        res: vec![res],
+                        call: InternalCallTy::HostFunction {
+                            name: HostFunctions::Bls12381MultiPairingCheck.name().to_string(),
+                        },
+                        args: vec![vp1_obj, vp2_obj],
+                        return_tys: vec![Type::Uint(64)],
+                    },
+                );
+                let res_expr = Expression::Variable {
+                    loc: pt::Loc::Codegen,
+                    ty: Type::Uint(64),
+                    var_no: res,
+                };
+                Some(soroban_decode_arg(
+                    res_expr,
+                    cfg,
+                    vartab,
+                    ns,
+                    Some(Type::Bool),
+                ))
+            }
             ast::Builtin::Timestamp => {
                 assert_eq!(args.len(), 0, "timestamp expects no arguments");
                 let timestamp_var_no = vartab.temp_name("timestamp", &Type::Uint(64));

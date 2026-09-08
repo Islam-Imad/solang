@@ -43,6 +43,9 @@ Documented Counterparts
    * - `eth_abi <https://github.com/stellar/soroban-examples/tree/main/eth_abi>`_
      - `docs/examples/soroban/eth_abi.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/eth_abi.sol>`_ and `tests/soroban_testcases/example_eth_abi.rs <https://github.com/hyperledger-solang/solang/blob/main/tests/soroban_testcases/example_eth_abi.rs>`_
      - ABI codec round-trip: decode an ``Input`` struct (``bytes32``, two ``uint256``), compute ``Output{a, b + c}``, and re-encode it. Faithful to the upstream *logic* using ``abi.encode``/``abi.decode``, but note the codec is Soroban-native, not Ethereum's 32-byte-word ABI: an encoded buffer holds live host-object handles (a struct becomes a Map object, ``bytes32`` a Bytes object, ``uint256`` a 256-bit-integer object), so the encode → ``exec`` → decode chain must stay inside a single invocation. Tested via ``example_eth_abi_*`` test cases.
+   * - `groth16_verifier <https://github.com/stellar/soroban-examples/tree/main/groth16_verifier>`_
+     - `docs/examples/soroban/groth16_verifier.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/groth16_verifier.sol>`_ and `tests/soroban_testcases/example_groth16_verifier.rs <https://github.com/hyperledger-solang/solang/blob/main/tests/soroban_testcases/example_groth16_verifier.rs>`_
+     - Groth16 zkSNARK proof verifier over BLS12-381. Rebuilds the public-input combination ``vk_x = ic[0] + sum(pub_signals[i] * ic[i+1])`` and checks the pairing equation ``e(-A,B) * e(alpha,beta) * e(vk_x,gamma) * e(C,delta) == 1`` using the ``bls12_381_g1_mul``, ``bls12_381_g1_add`` and ``bls12_381_pairing_check`` builtins (host ``bls12_381_g1_mul``/``bls12_381_g1_add``/``bls12_381_multi_pairing_check``). Curve points are opaque ``bytes`` (G1 = 96 bytes, G2 = 192 bytes) validated by the host, and Fr scalars are ``uint256``. G1 negation of ``proof.a`` needs no dedicated host op: since G1 has prime order ``r``, ``-A = (r-1)*A``, computed as ``bls12_381_g1_mul(proof.a, R - 1)``. Tested via ``groth16_verify_*`` test cases.
    * - `hello_world <https://github.com/stellar/soroban-examples/tree/main/hello_world>`_
      - `docs/examples/soroban/hello_world.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/hello_world.sol>`_ and `tests/soroban_testcases/example_hello_world.rs <https://github.com/hyperledger-solang/solang/blob/main/tests/soroban_testcases/example_hello_world.rs>`_
      - Minimal ``hello(string) -> string[]`` contract mirroring the upstream ``String -> Vec<String>`` example: returns ``["Hello", <name>]``. Demonstrates a ``string`` parameter and a ``string[]`` return value over the Soroban ABI. Tested via ``example_hello_world_*`` test cases.
@@ -791,6 +794,69 @@ The contract that gets deployed simply stores its constructor argument so a call
 
         function value() public view returns (uint32) {
             return stored_value;
+        }
+    }
+
+groth16_verifier
+^^^^^^^^^^^^^^^^
+
+Upstream Soroban example: `groth16_verifier <https://github.com/stellar/soroban-examples/tree/main/groth16_verifier>`_
+
+Solang Solidity example: `docs/examples/soroban/groth16_verifier.sol <https://github.com/hyperledger-solang/solang/blob/main/docs/examples/soroban/groth16_verifier.sol>`_
+
+A Groth16 zkSNARK proof verifier over the BLS12-381 curve. ``verify_proof`` first rebuilds the linear combination of the public inputs, ``vk_x = ic[0] + sum(pub_signals[i] * ic[i+1])``, then checks the pairing product ``e(-A,B) * e(alpha,beta) * e(vk_x,gamma) * e(C,delta) == 1``. Three BLS12-381 host functions are exposed as builtins — ``bls12_381_g1_mul(bytes, uint256)``, ``bls12_381_g1_add(bytes, bytes)`` and ``bls12_381_pairing_check(bytes[], bytes[])`` — mapping to the host's ``bls12_381_g1_mul``, ``bls12_381_g1_add`` and ``bls12_381_multi_pairing_check``. Curve points stay opaque ``bytes`` (G1 = 96 bytes, G2 = 192 bytes) that the host validates, and ``pub_signals`` are ``uint256`` Fr scalars, mirroring upstream's ``Vec<Fr>``. The host exposes no G1 negation, so ``-A`` is obtained without any in-contract field arithmetic: because G1 has prime order ``r``, ``(r-1)*A == -A``, computed with ``bls12_381_g1_mul(proof.a, R - 1)`` where ``R`` is the scalar-field order.
+
+.. code-block:: solidity
+
+    contract groth16_verifier {
+        uint256 constant R =
+            0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001;
+        uint256 constant R_MINUS_1 = R - 1;
+
+        struct VerificationKey {
+            bytes alpha;   // G1
+            bytes beta;    // G2
+            bytes gamma;   // G2
+            bytes delta;   // G2
+            bytes[] ic;    // G1[]
+        }
+
+        struct Proof {
+            bytes a;
+            bytes b;
+            bytes c;
+        }
+
+        function verify_proof(
+            VerificationKey vk,
+            Proof proof,
+            uint256[] pub_signals
+        ) public returns (bool) {
+            require(pub_signals.length + 1 == vk.ic.length, "MalformedVerifyingKey");
+
+            bytes memory vk_x = vk.ic[0];
+            for (uint32 i = 0; i < pub_signals.length; i++) {
+                bytes memory prod = bls12_381_g1_mul(vk.ic[i + 1], pub_signals[i]);
+                vk_x = bls12_381_g1_add(vk_x, prod);
+            }
+
+            // -A via scalar (r-1); no dedicated negation host function exists.
+            bytes memory negA = bls12_381_g1_mul(proof.a, R_MINUS_1);
+
+            // e(-A, B) * e(alpha, beta) * e(vk_x, gamma) * e(C, delta) == 1
+            bytes[] memory vp1 = new bytes[](4);
+            vp1[0] = negA;
+            vp1[1] = vk.alpha;
+            vp1[2] = vk_x;
+            vp1[3] = proof.c;
+
+            bytes[] memory vp2 = new bytes[](4);
+            vp2[0] = proof.b;
+            vp2[1] = vk.beta;
+            vp2[2] = vk.gamma;
+            vp2[3] = vk.delta;
+
+            return bls12_381_pairing_check(vp1, vp2);
         }
     }
 
